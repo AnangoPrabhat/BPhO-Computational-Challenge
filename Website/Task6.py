@@ -2,21 +2,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from random import randint
 
-#Everything before "image = plt.imread(image)" is just on ellas request, before we actually submit it would be replaced
-choice = input("Tall (T) or Wide (W)")
-while choice.upper() != "T" and choice.upper() != "W":
-    choice = input("Tall (T) or Wide (W)")
-if choice.upper() == "T":
-    ella_hugo_BOSS_ulbrich = randint(1,22)
-    if ella_hugo_BOSS_ulbrich == 7:
-        image = "Tall2.jpg"
-        #Thales: 80 wide, 134 high
-    else:
-        image = "Tall1.jpg"
-        #Ella: 80 wide, 155 high
-else:
-    image = "aWide.jpg"
-    #164 wide, 80 high
+image = "Tall1.jpg" #Ella
 
 image = plt.imread(image)
 scale = 3
