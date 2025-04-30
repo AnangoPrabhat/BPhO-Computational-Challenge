@@ -6,13 +6,6 @@ import logging
 
 app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return 'Hello, World!'
-
-if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 10000))  # Default to 10000 if PORT is not set
-    app.run(host='0.0.0.0', port=port)
 
 # Set up logging; warnings will be printed to the console.
 logging.basicConfig(level=logging.INFO)
@@ -265,4 +258,5 @@ def run_python_file(filename, task_name):
 
 if __name__ == '__main__':
     # For development, run with debug=True.
-    app.run(debug=True)
+    port = int(os.environ.get('PORT', 10000))  # Default to 10000 if PORT is not set
+    app.run(debug=True, host='0.0.0.0', port=port)
