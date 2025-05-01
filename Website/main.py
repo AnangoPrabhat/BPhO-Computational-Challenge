@@ -1,11 +1,12 @@
 # main.py
-from flask import Flask, render_template_string, url_for, send_file, request, redirect
-import subprocess
 import os
-import logging
 import io
-from time import perf_counter
+import uuid
+import logging
+import subprocess
+from time import perf_counter, time
 
+from flask import Flask, render_template_string, url_for, send_file, request, redirect
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -13,8 +14,30 @@ app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # --------------------------------------------------------------------
-# Global resources – e.g. load the image used by Task 6 (and similar tasks)
+# Global interrupt management
+#
+# For each interactive task (by key) we keep the latest request ID.
+# When a new slider update occurs, the new request ID is stored and
+# any long-running computation checking periodically via check_interrupt()
+# will abort if it finds its stored ID is no longer current.
 # --------------------------------------------------------------------
+active_requests = {}  # e.g., {"task6": <uuid>, "task5": <uuid>}
+
+def check_interrupt(task_key, request_id):
+    """
+    Check if the current computation is still the latest for the given task;
+    if not, abort processing by raising an exception.
+    """
+    if active_requests.get(task_key) != request_id:
+        raise Exception("Aborted: a newer slider update was received.")
+
+# --------------------------------------------------------------------
+# Global image loading (used by both tasks)
+#
+# For Task 6 and Task 5 we assume an image file is available.
+# (For Task 5 you might later want to add a user selection widget.)
+# --------------------------------------------------------------------
+# Here we load "Tall1.jpg" as before.
 image_file = "Tall1.jpg"
 if os.path.exists(image_file):
     image = plt.imread(image_file)
@@ -22,76 +45,208 @@ if os.path.exists(image_file):
 else:
     logging.error("Image file Tall1.jpg not found!")
     image = None
-    img_height, img_width, channels = 0, 0, 0
+    img_height = img_width = channels = 0
+
+# For Task 5, we use the same image and dimensions.
+H, W = img_height, img_width
 
 # --------------------------------------------------------------------
-# Define a generic slider configuration for interactive tasks.
-# The configuration is a list of dictionaries.
-# For Task 6 we need the following four sliders.
-# Notice that you can add extra keys later if needed.
+# Functions for Task 5 (canvas creation)
 # --------------------------------------------------------------------
-task6_sliders = [
-    {
-        "id": "start_x",
-        "label": "Start X",
-        "min": -int(1 * img_width),
-        "max": int(2.5 * img_width),
-        "value": 60,
-        "step": 10
-    },
-    {
-        "id": "start_y",
-        "label": "Start Y",
-        "min": -int(1.5 * img_height),
-        "max": int(1.5 * img_height),
-        "value": 0,
-        "step": 10
-    },
-    {
-        "id": "scale",
-        "label": "Canvas Scale",
-        "min": 1,
-        "max": 41,
-        "value": 7,
-        "step": 10
-    },
-    {
-        "id": "f_val",
-        "label": "Focal Length",
-        "min": 0,
-        "max": int(1.5 * img_height),
-        "value": 150,
-        "step": 10
-    }
-]
+def compute_S(offset_x, offset_y):
+    """
+    Compute a square canvas side length S (in pixels) that is as small as possible
+    while ensuring both copies of the image (with the given offsets) will be fully contained.
+    This is based on an initial factor of 4 * max(W, H) plus additional requirements.
+    """
+    base = 4 * max(W, H)
+    req_x = 4 * ((W - 1) + offset_x)
+    req_y = H + 2 * abs(offset_y)
+    return int(max(base, req_x, req_y))
+
+def create_canvas(S, offset_x, offset_y, request_id, task_key):
+    """
+    Create a square white canvas (S x S) and draw two copies of the image:
+      - The "right" copy, drawn normally.
+      - The "left" copy is a mirrored copy.
+    The center of the image is placed at (S//2 + offset_x, S//2 + offset_y).
+    Periodically checks for interruption.
+    """
+    canvas = np.full((S, S, image.shape[2]), 255, dtype=np.uint8)
+    center_x = S // 2
+    center_y = S // 2 + offset_y
+
+    for y in range(H):
+        if y % 10 == 0:
+            check_interrupt(task_key, request_id)
+        for x in range(W):
+            colour = image[y, x]
+            # Right (normal) copy:
+            old_x = center_x + S // 4 + x + offset_x
+            old_y = center_y - H // 2 + y
+            # Left (mirrored) copy:
+            new_x = center_x - S // 4 - x - offset_x
+            new_y = center_y - H // 2 + y
+            if 0 <= old_x < S and 0 <= old_y < S:
+                canvas[old_y, old_x] = colour
+            if 0 <= new_x < S and 0 <= new_y < S:
+                canvas[new_y, new_x] = colour
+    return canvas
+
+def generate_task5_plot(offset_x, offset_y, request_id):
+    """
+    Generate the Task 5 plot: two copies of the image (normal and mirrored)
+    displayed on a square canvas.
+    """
+    S = compute_S(offset_x, -offset_y)
+    # Create canvas with interruption checks during nested loops.
+    canvas = create_canvas(S, offset_x, -offset_y, request_id, "task5")
+    
+    # Create the matplotlib figure.
+    fig, ax = plt.subplots(figsize=(6, 6))
+    ax.imshow(canvas, extent=[-2, 2, -2, 2])
+    ax.axvline(x=0, color='black', linestyle='--')
+    ax.set_title(f"Offset X: {offset_x}, Offset Y: {offset_y}\nCanvas Size: {S}px")
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close(fig)
+    return buf
 
 # --------------------------------------------------------------------
-# The generic interactive dictionary.
-# For any interactive task you add an entry here.
-# (For example, if Task 2 becomes interactive, create its slider config and plot endpoint.)
+# Functions for Task 6 (image projection)
 # --------------------------------------------------------------------
-interactive_tasks = {
-    6: {
-        "title": "Task 6 Interactive Visualization",
-        "sliders": task6_sliders,
-        "plot_endpoint": "/plot/task6",
-        "banned_validation": True,  # indicates that Task 6 needs special banned-range logic
-        "extra_context": { "img_width": img_width }  # extra info used in the template
-    },
-    # You could add more interactive tasks here ...
-}
+def generate_task6_plot(start_x, start_y, scale, f_val, request_id):
+    """
+    Generate the Task 6 projection plot using your algorithm.
+    This function periodically checks for interruption.
+    """
+    t0 = perf_counter()
+    # Adjust start_y as in your original code.
+    fudge_y = img_height // 2
+    start_y_adjusted = (start_y + fudge_y) * -1
+
+    size = max(img_height, img_width) * scale
+    canvas_height = size
+    canvas_width = int(size * 1.5)
+    canvas = np.full((canvas_height, canvas_width, channels), 255, dtype=np.uint8)
+
+    yy, xx = np.indices((img_height, img_width))
+    old_x = xx + start_x
+    old_y = yy + start_y_adjusted
+
+    new_x_float = - (f_val * old_x) / (old_x - f_val)
+    new_x = new_x_float.astype(int)
+    new_y_float = (old_y / old_x) * new_x_float
+    new_y = new_y_float.astype(int)
+
+    old_y_index = (canvas_height // 2) + old_y
+    old_x_index = (canvas_width // 2) + old_x
+    new_y_index = (canvas_height // 2) + new_y
+    new_x_index = (canvas_width // 2) + new_x
+
+    valid_old = (old_y_index >= 0) & (old_y_index < canvas_height) & \
+                (old_x_index >= 0) & (old_x_index < canvas_width)
+    valid_new = (new_y_index >= 0) & (new_y_index < canvas_height) & \
+                (new_x_index >= 0) & (new_x_index < canvas_width)
+
+    canvas[old_y_index[valid_old], old_x_index[valid_old]] = image[yy[valid_old], xx[valid_old]]
+    canvas[new_y_index[valid_new], new_x_index[valid_new]] = image[yy[valid_new], xx[valid_new]]
+
+    # Compute bounding box for the new projection.
+    all_new_x = new_x_index[valid_new].ravel()
+    all_new_y = new_y_index[valid_new].ravel()
+    raw_min_x = int(all_new_x.min())
+    raw_max_x = int(all_new_x.max())
+    raw_min_y = int(all_new_y.min())
+    raw_max_y = int(all_new_y.max())
+
+    minimum_x = max(raw_min_x, 0)
+    maximum_x = min(raw_max_x, canvas_width - 1)
+    minimum_y = max(raw_min_y, 0)
+    maximum_y = min(raw_max_y, canvas_height - 1)
+
+    # --- Interpolation functions with periodic interruption checks ---
+    def fix_row(row, left, right):
+        cols = np.arange(left, right+1)
+        row_slice = canvas[row, left:right+1]
+        mask = (row_slice != 255).any(axis=1)
+        if mask.sum() < 2:
+            return
+        filled_cols = cols[mask]
+        seg_left = filled_cols[0]
+        seg_right = filled_cols[-1]
+        interp_cols = np.arange(seg_left, seg_right+1)
+        for ch in range(channels):
+            xp = filled_cols
+            fp = row_slice[mask, ch]
+            interpolated = np.interp(interp_cols, xp, fp)
+            canvas[row, interp_cols, ch] = np.around(interpolated).astype(np.uint8)
+
+    def fix_col(col, top, bottom):
+        rows = np.arange(top, bottom+1)
+        col_slice = canvas[top:bottom+1, col]
+        mask = (col_slice != 255).any(axis=1)
+        if mask.sum() < 2:
+            return
+        filled_rows = rows[mask]
+        interp_rows = np.arange(filled_rows[0], filled_rows[-1]+1)
+        for ch in range(channels):
+            xp = filled_rows
+            fp = col_slice[mask, ch]
+            interpolated = np.interp(interp_rows, xp, fp)
+            canvas[interp_rows, col, ch] = np.around(interpolated).astype(np.uint8)
+    
+    # Run interpolation loops with interruption checks every 10 iterations.
+    for col in range(minimum_x, maximum_x+1):
+        if (col - minimum_x) % 10 == 0:
+            check_interrupt("task6", request_id)
+        fix_col(col, minimum_y, maximum_y)
+    for row in range(minimum_y, maximum_y+1):
+        if (row - minimum_y) % 10 == 0:
+            check_interrupt("task6", request_id)
+        fix_row(row, minimum_x, maximum_x)
+
+    t_elapsed = perf_counter() - t0
+    print("Task 6 processing time: {:.4f} seconds".format(t_elapsed))
+
+    # Create the matplotlib figure.
+    fig, ax = plt.subplots(figsize=(8, 6))
+    extent_val = [-canvas_width // 2, canvas_width // 2, -canvas_height // 2, canvas_height // 2]
+    ax.imshow(canvas, extent=extent_val)
+    ax.set_xlim(extent_val[0], extent_val[1])
+    ax.set_ylim(extent_val[2], extent_val[3])
+    ax.axvline(x=0, color='black', linestyle='--')
+    ax.scatter(f_val, 0, color='red', marker='*')
+    ax.scatter(-f_val, 0, color='red', marker='*')
+    ax.set_title(f"Task 6: start_x = {start_x}, start_y (adj) = {start_y_adjusted}")
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    buf.seek(0)
+    plt.close(fig)
+    return buf
+
+def generate_blank_image():
+    """
+    Return a simple blank image indicating that the computation was cancelled.
+    """
+    fig, ax = plt.subplots(figsize=(4,4))
+    ax.text(0.5, 0.5, 'Cancelled', horizontalalignment='center',
+            verticalalignment='center', transform=ax.transAxes, fontsize=16)
+    ax.axis('off')
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 # --------------------------------------------------------------------
-# Generic interactive page template.
+# Interactive Page Template (generic)
 #
-# This template is rendered given a list of slider definitions.
-# Each slider definition must include:
-#   id, label, min, max, value, and step.
-#
-# If banned_validation is True, additional JavaScript logic
-# is inserted for validating the relationship between sliders.
-#
-# The image is auto-updated by a URL (i.e. /plot/...) which you pass.
+# The template is built from a list of slider definitions and parameters.
+# A spinner is overlaid on the plot and shown while a new plot is loading.
+# If "banned_validation" is True (for Task 6) extra JS is added.
 # --------------------------------------------------------------------
 interactive_template = '''
 <!DOCTYPE html>
@@ -105,7 +260,27 @@ interactive_template = '''
     .slider-block { margin-bottom: 15px; }
     label { font-weight: bold; margin-bottom: 5px; display: block; }
     input[type=range] { width: 100%; }
-    .plot-container { text-align: center; }
+    .plot-container { position: relative; text-align: center; }
+    /* Spinner CSS */
+    .spinner {
+      border: 8px solid #f3f3f3;
+      border-top: 8px solid #3498db;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      position: absolute;
+      left: 50%;
+      top: 50%;
+      margin-left: -20px;
+      margin-top: -20px;
+      z-index: 10;
+      display: none;
+    }
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
   </style>
 </head>
 <body>
@@ -120,9 +295,9 @@ interactive_template = '''
   </div>
   <div class="plot-container">
     <img id="plotImage" src="{{ plot_endpoint }}?{{ initial_query }}" alt="Interactive Plot" style="max-width: 800px; width: 100%;">
+    <div id="spinner" class="spinner"></div>
   </div>
   <script>
-    // Basic function to update the plot from slider values.
     function updatePlot() {
       const params = {};
       {% for slider in sliders %}
@@ -130,13 +305,14 @@ interactive_template = '''
         document.getElementById("{{ slider.id }}_value").innerText = document.getElementById("{{ slider.id }}").value;
       {% endfor %}
       const query = new URLSearchParams(params);
-      // Append a timestamp to prevent caching.
       query.append("_", new Date().getTime());
+      // Show spinner while waiting for new plot.
+      document.getElementById("spinner").style.display = "block";
       document.getElementById("plotImage").src = "{{ plot_endpoint }}?" + query.toString();
     }
     
     {% if banned_validation %}
-      // For Task 6 we ban the slider f_val from being in the forbidden zone with respect to start_x.
+      // For banned_validation (Task 6), special logic is added.
       var IMG_WIDTH = {{ img_width }};
       var oldValues = {};
       {% for slider in sliders %}
@@ -149,11 +325,9 @@ interactive_template = '''
         var start_x = parseInt(document.getElementById("start_x").value);
         var f_val = parseInt(document.getElementById("f_val").value);
         
-        // Check the banned condition:
-        // If start_x <= f_val <= start_x + IMG_WIDTH then make an adjustment.
+        // Banned condition: disallow f_val from being within start_x and start_x+IMG_WIDTH.
         if (sliderId === "start_x") {
           if (start_x <= f_val && f_val <= start_x + IMG_WIDTH) {
-            // Determine direction of change.
             if (newValue > oldValues["start_x"]) {
               f_val = f_val + 1;
             } else {
@@ -174,13 +348,12 @@ interactive_template = '''
             document.getElementById("f_val_value").innerText = f_val;
           }
         }
-        // Update the old value for this slider.
         oldValues[sliderId] = parseInt(document.getElementById(sliderId).value);
         updatePlot();
       }
     {% endif %}
     
-    // Attach event listeners to all sliders.
+    // Attach event listeners.
     {% for slider in sliders %}
       {% if banned_validation %}
         document.getElementById("{{ slider.id }}").addEventListener("input", sliderChanged);
@@ -188,6 +361,11 @@ interactive_template = '''
         document.getElementById("{{ slider.id }}").addEventListener("input", updatePlot);
       {% endif %}
     {% endfor %}
+    
+    // Hide spinner when image loads.
+    document.getElementById("plotImage").addEventListener("load", function() {
+      document.getElementById("spinner").style.display = "none";
+    });
   </script>
 </body>
 </html>
@@ -196,12 +374,6 @@ interactive_template = '''
 def render_interactive_page(slider_config, title, plot_endpoint, banned_validation=False, extra_context=None):
     """
     Renders an interactive page using the generic template.
-    
-    slider_config: list of dicts, one per slider.
-    title: title of the page.
-    plot_endpoint: URL used for fetching the plot image.
-    banned_validation: if True, special validation code is added.
-    extra_context: any additional context variables (e.g. img_width).
     """
     if extra_context is None:
         extra_context = {}
@@ -219,7 +391,83 @@ def render_interactive_page(slider_config, title, plot_endpoint, banned_validati
     return render_template_string(interactive_template, **context)
 
 # --------------------------------------------------------------------
-# The rest of your application: noninteractive tasks, subtasks, etc.
+# Interactive Tasks Configuration
+#
+# Here we define the slider configuration for each interactive task.
+# --------------------------------------------------------------------
+offset_range = max(W, H)
+task6_sliders = [
+    {
+        "id": "start_x",
+        "label": "Start X",
+        "min": -int(1 * img_width),
+        "max": int(2.5 * img_width),
+        "value": 60,
+        "step": 1
+    },
+    {
+        "id": "start_y",
+        "label": "Start Y",
+        "min": -int(1.5 * img_height),
+        "max": int(1.5 * img_height),
+        "value": 0,
+        "step": 1
+    },
+    {
+        "id": "scale",
+        "label": "Canvas Scale",
+        "min": 1,
+        "max": 41,
+        "value": 7,
+        "step": 1
+    },
+    {
+        "id": "f_val",
+        "label": "Focal Length",
+        "min": 0,
+        "max": int(1.5 * img_height),
+        "value": 150,
+        "step": 1
+    }
+]
+
+task5_sliders = [
+    {
+        "id": "offset_x",
+        "label": "Object X (px)",
+        "min": -offset_range,
+        "max": offset_range,
+        "value": 0,
+        "step": 1
+    },
+    {
+        "id": "offset_y",
+        "label": "Object Y (px)",
+        "min": -offset_range,
+        "max": offset_range,
+        "value": 0,
+        "step": 1
+    }
+]
+
+interactive_tasks = {
+    6: {
+        "title": "Task 6 Interactive Visualization",
+        "sliders": task6_sliders,
+        "plot_endpoint": "/plot/task6",
+        "banned_validation": True,
+        "extra_context": { "img_width": img_width }
+    },
+    5: {
+        "title": "Task 5 Interactive Visualization",
+        "sliders": task5_sliders,
+        "plot_endpoint": "/plot/task5",
+        "banned_validation": False
+    }
+}
+
+# --------------------------------------------------------------------
+# Other Templates for noninteractive tasks (unchanged)
 # --------------------------------------------------------------------
 MAIN_TEMPLATE = '''
 <!DOCTYPE html>
@@ -386,23 +634,20 @@ DUMMY_TEMPLATE = '''
 </html>
 '''
 
+# --------------------------------------------------------------------
+# Flask Routes
+# --------------------------------------------------------------------
 @app.route('/')
 def index():
-    """
-    Home page showing a grid of tasks.
-    """
     tasks = list(range(1, 13))
     return render_template_string(MAIN_TEMPLATE, tasks=tasks)
 
 @app.route('/task/<int:task_id>')
 def handle_task(task_id):
-    """
-    If the task is interactive, redirect to the interactive page.
-    If it has subtasks, show the subtask grid.
-    Otherwise, run the task file via subprocess.
-    """
+    # For interactive tasks (e.g., 5 and 6) redirect to the interactive page.
     if task_id in interactive_tasks:
         return redirect(url_for('interactive_task', task_id=task_id))
+    # For tasks with subtasks (example: Task 1 and 11):
     if task_id in [1, 11]:
         subtasks = ['a', 'b'] if task_id == 1 else ['a', 'b', 'c', 'd']
         return render_template_string(SUBTASK_TEMPLATE, task_id=task_id, subtasks=subtasks)
@@ -412,9 +657,6 @@ def handle_task(task_id):
 
 @app.route('/task/<int:task_id>/<subtask>')
 def handle_subtask(task_id, subtask):
-    """
-    Runs the specified subtask file.
-    """
     if task_id in [1, 11]:
         filename = f"Task{task_id}{subtask}.py"
         return run_python_file(filename, task_name=f"{task_id}{subtask}")
@@ -424,10 +666,6 @@ def handle_subtask(task_id, subtask):
 
 @app.route('/interactive/<int:task_id>')
 def interactive_task(task_id):
-    """
-    Route for interactive tasks.
-    Uses the generic template if an entry exists in interactive_tasks.
-    """
     if task_id in interactive_tasks:
         config = interactive_tasks[task_id]
         return render_interactive_page(config["sliders"],
@@ -439,9 +677,6 @@ def interactive_task(task_id):
         return f"No interactive configuration defined for task {task_id}", 404
 
 def run_python_file(filename, task_name):
-    """
-    Executes a Python file via subprocess and returns its output.
-    """
     if not os.path.isfile(filename):
         logging.warning(f"File {filename} does not exist.")
         return render_template_string(DUMMY_TEMPLATE, task_name=task_name)
@@ -461,11 +696,7 @@ def run_python_file(filename, task_name):
         return render_template_string(OUTPUT_TEMPLATE, task_name=task_name, output=f"Error executing task: {e}")
 
 # --------------------------------------------------------------------
-# Task 6 Plot Generation
-#
-# This route is called by the interactive page using the slider values.
-# Instead of opening a new window, the code computes the image and returns
-# it as a PNG image that the browser displays.
+# Plot Routes for Interactive Tasks
 # --------------------------------------------------------------------
 @app.route('/plot/task6')
 def plot_task6():
@@ -476,117 +707,30 @@ def plot_task6():
         f_val = int(request.args.get('f_val', task6_sliders[3]["value"]))
     except Exception as e:
         return "Invalid parameters", 400
+    try:
+        current_id = str(uuid.uuid4())
+        active_requests["task6"] = current_id
+        buf = generate_task6_plot(start_x, start_y, scale, f_val, current_id)
+        return send_file(buf, mimetype='image/png')
+    except Exception as e:
+        logging.info("Task 6 aborted: " + str(e))
+        return send_file(generate_blank_image(), mimetype='image/png')
 
-    buf = generate_task6_plot(start_x, start_y, scale, f_val)
-    return send_file(buf, mimetype='image/png')
-
-def generate_task6_plot(start_x, start_y, scale, f_val):
-    """
-    Generates the plot for Task 6 similar to your original algorithm,
-    but instead of showing the plot, saves it to a PNG buffer.
-    """
-    t0 = perf_counter()
-    # Adjust start_y according to your original code.
-    fudge_y = img_height // 2
-    start_y_adjusted = (start_y + fudge_y) * -1
-
-    size = max(img_height, img_width) * scale
-    canvas_height = size
-    canvas_width = int(size * 1.5)
-    canvas = np.full((canvas_height, canvas_width, channels), 255, dtype=np.uint8)
-
-    yy, xx = np.indices((img_height, img_width))
-    old_x = xx + start_x
-    old_y = yy + start_y_adjusted
-
-    new_x_float = - (f_val * old_x) / (old_x - f_val)
-    new_x = new_x_float.astype(int)
-    new_y_float = (old_y / old_x) * new_x_float
-    new_y = new_y_float.astype(int)
-
-    old_y_index = (canvas_height // 2) + old_y
-    old_x_index = (canvas_width // 2) + old_x
-    new_y_index = (canvas_height // 2) + new_y
-    new_x_index = (canvas_width // 2) + new_x
-
-    valid_old = (old_y_index >= 0) & (old_y_index < canvas_height) & \
-                (old_x_index >= 0) & (old_x_index < canvas_width)
-    valid_new = (new_y_index >= 0) & (new_y_index < canvas_height) & \
-                (new_x_index >= 0) & (new_x_index < canvas_width)
-
-    canvas[old_y_index[valid_old], old_x_index[valid_old]] = image[yy[valid_old], xx[valid_old]]
-    canvas[new_y_index[valid_new], new_x_index[valid_new]] = image[yy[valid_new], xx[valid_new]]
-
-    # Compute bounding box for the new projection.
-    all_new_x = new_x_index[valid_new].ravel()
-    all_new_y = new_y_index[valid_new].ravel()
-    raw_min_x = int(all_new_x.min())
-    raw_max_x = int(all_new_x.max())
-    raw_min_y = int(all_new_y.min())
-    raw_max_y = int(all_new_y.max())
-
-    minimum_x = max(raw_min_x, 0)
-    maximum_x = min(raw_max_x, canvas_width - 1)
-    minimum_y = max(raw_min_y, 0)
-    maximum_y = min(raw_max_y, canvas_height - 1)
-
-    # Interpolation functions to fix blank areas.
-    def fix_row(row, left, right):
-        cols = np.arange(left, right+1)
-        row_slice = canvas[row, left:right+1]
-        mask = (row_slice != 255).any(axis=1)
-        if mask.sum() < 2:
-            return
-        filled_cols = cols[mask]
-        seg_left = filled_cols[0]
-        seg_right = filled_cols[-1]
-        interp_cols = np.arange(seg_left, seg_right+1)
-        for ch in range(channels):
-            xp = filled_cols
-            fp = row_slice[mask, ch]
-            interpolated = np.interp(interp_cols, xp, fp)
-            canvas[row, interp_cols, ch] = np.around(interpolated).astype(np.uint8)
-
-    def fix_col(col, top, bottom):
-        rows = np.arange(top, bottom+1)
-        col_slice = canvas[top:bottom+1, col]
-        mask = (col_slice != 255).any(axis=1)
-        if mask.sum() < 2:
-            return
-        filled_rows = rows[mask]
-        seg_top = filled_rows[0]
-        seg_bottom = filled_rows[-1]
-        interp_rows = np.arange(seg_top, seg_bottom+1)
-        for ch in range(channels):
-            xp = filled_rows
-            fp = col_slice[mask, ch]
-            interpolated = np.interp(interp_rows, xp, fp)
-            canvas[interp_rows, col, ch] = np.around(interpolated).astype(np.uint8)
-
-    for col in range(minimum_x, maximum_x+1):
-        fix_col(col, minimum_y, maximum_y)
-    for row in range(minimum_y, maximum_y+1):
-        fix_row(row, minimum_x, maximum_x)
-
-    t_elapsed = perf_counter() - t0
-    print("Task 6 processing time: {:.4f} seconds".format(t_elapsed))
-
-    # Create the matplotlib figure.
-    fig, ax = plt.subplots(figsize=(8, 6))
-    extent_val = [-canvas_width // 2, canvas_width // 2, -canvas_height // 2, canvas_height // 2]
-    ax.imshow(canvas, extent=extent_val)
-    ax.set_xlim(extent_val[0], extent_val[1])
-    ax.set_ylim(extent_val[2], extent_val[3])
-    ax.axvline(x=0, color='black', linestyle='--')
-    ax.scatter(f_val, 0, color='red', marker='*')
-    ax.scatter(-f_val, 0, color='red', marker='*')
-    ax.set_title(f"Task 6: start_x = {start_x}, start_y (adjusted) = {start_y_adjusted}")
-    
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    buf.seek(0)
-    plt.close(fig)
-    return buf
+@app.route('/plot/task5')
+def plot_task5():
+    try:
+        offset_x = int(request.args.get('offset_x', task5_sliders[0]["value"]))
+        offset_y = int(request.args.get('offset_y', task5_sliders[1]["value"]))
+    except Exception as e:
+        return "Invalid parameters", 400
+    try:
+        current_id = str(uuid.uuid4())
+        active_requests["task5"] = current_id
+        buf = generate_task5_plot(offset_x, offset_y, current_id)
+        return send_file(buf, mimetype='image/png')
+    except Exception as e:
+        logging.info("Task 5 aborted: " + str(e))
+        return send_file(generate_blank_image(), mimetype='image/png')
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 10000))
