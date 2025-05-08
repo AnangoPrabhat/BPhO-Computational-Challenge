@@ -5,14 +5,21 @@ import uuid
 import logging
 from math import isqrt, cos, sin, radians, pi
 from time import perf_counter
-from flask import Flask, request, redirect, url_for, render_template_string, send_file
+from flask import Flask, request, redirect, url_for
 from werkzeug.utils import secure_filename
+import os
+from PIL import Image
 import numpy as np
+
+
+from flask import Flask, render_template_string, url_for, send_file, request, redirect
 import matplotlib.pyplot as plt
+import numpy as np
+
+# Additional matplotlib imports
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
 from werkzeug.utils import secure_filename
-from skimage.transform import resize
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -68,7 +75,7 @@ def generate_blank_image():
     return buf
 
 ########################################
-# INTERACTIVE TEMPLATE WITH SPINNER, ANIMATION, AND NAVIGATION
+# INTERACTIVE TEMPLATE WITH SPINNER AND ANIMATION
 ########################################
 interactive_template = '''
 <!DOCTYPE html>
@@ -118,34 +125,6 @@ interactive_template = '''
       margin-bottom: 15px;
     }
     .play-button:hover { background-color: #1e7e34; }
-    .back-button {
-      padding: 15px 25px;
-      background-color: #007BFF;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 1em;
-      cursor: pointer;
-      margin: 5px;
-    }
-    .back-button:hover { background-color: #0056b3; }
-    .nav-buttons {
-      margin-top: 20px;
-      text-align: center;
-    }
-    .small-task-button {
-      padding: 5px 10px;
-      margin: 2px;
-      font-size: 0.8em;
-      border: none;
-      border-radius: 5px;
-      background-color: #007BFF;
-      color: #fff;
-      cursor: pointer;
-    }
-    .small-task-button:hover {
-      background-color: #0056b3;
-    }
   </style>
 </head>
 <body>
@@ -153,7 +132,7 @@ interactive_template = '''
   <div class="slider-container">
     {% for slider in sliders %}
       <div class="slider-block">
-         <label for="{{ slider.id }}">{{ slider.label }} (<span id="{{ slider.id }}_value">{{ slider.value }}</span>)</label>
+         <label for="{{ slider.id }}">{{ slider.label }} (<span id="{{ slider.id }}_value">{{ slider.value }}</span>):</label>
          <input type="range" id="{{ slider.id }}" name="{{ slider.id }}" min="{{ slider.min }}" max="{{ slider.max }}" value="{{ slider.value }}" step="{{ slider.step }}">
       </div>
     {% endfor %}
@@ -170,15 +149,8 @@ interactive_template = '''
     function updatePlot() {
       const params = {};
       {% for slider in sliders %}
-        let rawValue_{{ slider.id }} = document.getElementById("{{ slider.id }}").value;
-        let formattedValue_{{ slider.id }};
-        if ("{{ slider.id }}" === "v") {
-          formattedValue_{{ slider.id }} = Math.pow(10, parseFloat(rawValue_{{ slider.id }})).toPrecision(3);
-        } else {
-          formattedValue_{{ slider.id }} = parseFloat(rawValue_{{ slider.id }}).toPrecision(3);
-        }
-        document.getElementById("{{ slider.id }}_value").innerText = formattedValue_{{ slider.id }};
-        params["{{ slider.id }}"] = rawValue_{{ slider.id }};
+        params["{{ slider.id }}"] = document.getElementById("{{ slider.id }}").value;
+        document.getElementById("{{ slider.id }}_value").innerText = document.getElementById("{{ slider.id }}").value;
       {% endfor %}
       const query = new URLSearchParams(params);
       query.append("_", new Date().getTime());
@@ -190,19 +162,19 @@ interactive_template = '''
       var IMG_WIDTH = {{ img_width }};
       var oldValues = {};
       {% for slider in sliders %}
-         oldValues["{{ slider.id }}"] = parseFloat(document.getElementById("{{ slider.id }}").value);
+         oldValues["{{ slider.id }}"] = parseInt(document.getElementById("{{ slider.id }}").value);
       {% endfor %}
       function sliderChanged(event) {
         var sliderId = event.target.id;
-        var newValue = parseFloat(event.target.value);
-        var start_x = parseFloat(document.getElementById("start_x").value);
-        var f_val = parseFloat(document.getElementById("f_val").value);
+        var newValue = parseInt(event.target.value);
+        var start_x = parseInt(document.getElementById("start_x").value);
+        var f_val = parseInt(document.getElementById("f_val").value);
         if (sliderId === "start_x") {
           if (start_x <= f_val && f_val <= start_x + IMG_WIDTH) {
             if (newValue > oldValues["start_x"]) { f_val = f_val + 1; }
             else { f_val = f_val - IMG_WIDTH - 1; }
             document.getElementById("f_val").value = f_val;
-            document.getElementById("f_val_value").innerText = parseFloat(f_val).toPrecision(3);
+            document.getElementById("f_val_value").innerText = f_val;
           }
         }
         if (sliderId === "f_val") {
@@ -210,10 +182,10 @@ interactive_template = '''
             if (newValue > oldValues["f_val"]) { f_val = start_x + IMG_WIDTH + 1; }
             else { f_val = start_x - 1; }
             document.getElementById("f_val").value = f_val;
-            document.getElementById("f_val_value").innerText = parseFloat(f_val).toPrecision(3);
+            document.getElementById("f_val_value").innerText = f_val;
           }
         }
-        oldValues[sliderId] = parseFloat(document.getElementById(sliderId).value);
+        oldValues[sliderId] = parseInt(document.getElementById(sliderId).value);
         updatePlot();
       }
     {% endif %}
@@ -238,7 +210,7 @@ interactive_template = '''
          var endVal = parseFloat(slider.max);
          var interval = 1000; // 1 second per step
          slider.value = startVal;
-         document.getElementById("{{ sliders[0].id }}_value").innerText = parseFloat(startVal).toPrecision(3);
+         document.getElementById("{{ sliders[0].id }}_value").innerText = startVal;
          updatePlot();
          var current = startVal;
          currentAnimation = setInterval(function() {
@@ -248,19 +220,15 @@ interactive_template = '''
                currentAnimation = null;
             } else {
                slider.value = current;
-               document.getElementById("{{ sliders[0].id }}_value").innerText = parseFloat(current).toPrecision(3);
+               document.getElementById("{{ sliders[0].id }}_value").innerText = current;
                updatePlot();
             }
          }, interval);
       });
     {% endif %}
-    window.onload = updatePlot;
   </script>
-  <div class="nav-buttons">
-      <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
-      {% for key, task in tasks_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
-      {% endfor %}
+    <div class="container">
+  <a class="back-button" href="{{ url_for('index') }}">Back to Home</a>
   </div>
 </body>
 </html>
@@ -269,8 +237,6 @@ interactive_template = '''
 def render_interactive_page(slider_config, title, plot_endpoint, banned_validation=False, extra_context=None, playable=False):
     if extra_context is None:
         extra_context = {}
-    # Add tasks_overview to context for navigation
-    extra_context["tasks_overview"] = task_overview
     initial_params = { slider["id"]: slider["value"] for slider in slider_config }
     initial_query = "&".join([f"{key}={value}" for key, value in initial_params.items()])
     context = {
@@ -279,8 +245,7 @@ def render_interactive_page(slider_config, title, plot_endpoint, banned_validati
         "plot_endpoint": plot_endpoint,
         "initial_query": initial_query,
         "banned_validation": banned_validation,
-        "playable": playable,
-        "img_width": img_width
+        "playable": playable
     }
     context.update(extra_context)
     return render_template_string(interactive_template, **context)
@@ -289,51 +254,55 @@ def render_interactive_page(slider_config, title, plot_endpoint, banned_validati
 # INTERACTIVE TASKS CONFIGURATION
 ########################################
 interactive_tasks = {
-    "3": {
-        "title": "Task 3 Interactive: Reflection Travel Time",
-        "sliders": [
-            {"id": "v", "label": "Speed (m/s)", "min": 1, "max": 8.60, "value": 8.60, "step": 0.1},
-            {"id": "n", "label": "Refractive Index", "min": 1, "max": 3, "value": 1, "step": 0.1},
-            {"id": "y", "label": "Height (m)", "min": 1, "max": 10, "value": 1, "step": 1},
-            {"id": "l", "label": "Length (m)", "min": 0.1, "max": 3.0, "value": 1.0, "step": 0.1}
-        ],
-        "plot_endpoint": "/plot/3",
-        "banned_validation": False
-    },
-    "4": {
-        "title": "Task 4 Interactive: Thin Lens Verification",
-        "sliders": [
-            {"id": "v", "label": "Speed (m/s)", "min": 1, "max": 8.60, "value": 8.60, "step": 0.1},
-            {"id": "n1", "label": "Refractive Index 1", "min": 1, "max": 3, "value": 1, "step": 0.1},
-            {"id": "n2", "label": "Refractive Index 2", "min": 1, "max": 3, "value": 1, "step": 0.1},
-            {"id": "y", "label": "Height (m)", "min": 1, "max": 10, "value": 1, "step": 1},
-            {"id": "l", "label": "Length (m)", "min": 0.1, "max": 3.0, "value": 1.0, "step": 0.1}
-        ],
-        "plot_endpoint": "/plot/4",
-        "banned_validation": False
-    },
-    "5": {
-        "title": "Task 5 Interactive: Virtual Image Plot",
-        "sliders": [
-            {"id": "offset_x", "label": "Offset X (px)", "min": -max(W, H), "max": 2 * max(W, H), "value": int(img_width / 2) + 1, "step": 10},
-            {"id": "offset_y", "label": "Offset Y (px)", "min": -max(W, H), "max": max(W, H), "value": 0, "step": 10},
-            {"id": "canvas_size", "label": "Canvas Size (px)", "min": int(4 * max(W, H) * 0.5), "max": int(4 * max(W, H) * 2), "value": int(4 * max(W, H)), "step": 10}
-        ],
-        "plot_endpoint": "/plot/5",
-        "banned_validation": False
-    },
-    "6": {
-        "title": "Task 6+7: Converging Lens Model",
-        "sliders": [
-            {"id": "start_x", "label": "Start X (px)", "min": -int(1 * img_width), "max": int(2.5 * img_width), "value": 60, "step": 1},
-            {"id": "start_y", "label": "Start Y (px)", "min": -int(1.5 * img_height), "max": int(1.5 * img_height), "value": 0, "step": 1},
-            {"id": "scale", "label": "Canvas Scale", "min": 1, "max": 15, "value": 7, "step": 1},
-            {"id": "f_val", "label": "Focal Length (px)", "min": 0, "max": int(1.5 * img_height), "value": 150, "step": 1}
-        ],
-        "plot_endpoint": "/plot/6",
-        "banned_validation": True,
-        "extra_context": {"img_width": img_width}
-    },
+    # Replace the task "3" entry in the interactive_tasks dictionary with:
+"3": {
+    "title": "Task 3 Interactive: Reflection Travel Time",
+    "sliders": [
+        {"id": "v", "label": "Speed: ", "min": 1, "max": 8.48, "value": 8.48, "step": 0.01},
+        {"id": "n", "label": "Refractive Index: ", "min": 1, "max": 3, "value": 1, "step": 0.1},
+        {"id": "y", "label": "Height: ", "min": 1, "max": 10, "value": 1, "step": 1},
+        {"id": "l", "label": "Length: ", "min": 0.1, "max": 3.0, "value": 1.0, "step": 0.01}
+    ],
+    "plot_endpoint": "/plot/3",
+    "banned_validation": False
+},
+    # Replace the task "4" entry in the interactive_tasks dictionary with:
+"4": {
+    "title": "Task 4 Interactive: Thin Lens Verification",
+    "sliders": [
+        {"id": "v", "label": "Speed: ", "min": 1, "max": 8.48, "value": 8.48, "step": 0.01},
+        {"id": "n1", "label": "Refractive Index 1: ", "min": 1, "max": 3, "value": 1, "step": 0.1},
+        {"id": "n2", "label": "Refractive Index 2: ", "min": 1, "max": 3, "value": 1, "step": 0.1},
+        {"id": "y", "label": "Height: ", "min": 1, "max": 10, "value": 1, "step": 1},
+        {"id": "l", "label": "Length: ", "min": 0.1, "max": 3.0, "value": 1.0, "step": 0.01}
+    ],
+    "plot_endpoint": "/plot/4",
+    "banned_validation": False
+},
+    # Replace the task "5" entry in the interactive_tasks dictionary with:
+"5": {
+    "title": "Task 5 Interactive: Virtual Image Plot",
+    "sliders": [
+        {"id": "offset_x", "label": "Start X: ", "min": -max(W, H), "max": max(W, H), "value": int(img_width / 2) + 1, "step": 1},
+        {"id": "offset_y", "label": "Start Y: ", "min": -max(W, H), "max": max(W, H), "value": 0, "step": 1},
+        {"id": "canvas_size", "label": "Canvas Size (px): ", "min": int(4 * max(W, H) * 0.5), "max": int(4 * max(W, H) * 2), "value": int(4 * max(W, H)), "step": 10}
+    ],
+    "plot_endpoint": "/plot/5",
+    "banned_validation": False
+},
+    # Replace the task "6" entry in the interactive_tasks dictionary with:
+"6": {
+    "title": "Task 6+7: Converging Lens Model",
+    "sliders": [
+        {"id": "start_x", "label": "Start X: ", "min": -int(1 * img_width), "max": int(2.5 * img_width), "value": 60, "step": 1},
+        {"id": "start_y", "label": "Start Y: ", "min": -int(1.5 * img_height), "max": int(1.5 * img_height), "value": 0, "step": 1},
+        {"id": "scale", "label": "Canvas Scale: ", "min": 1, "max": 41, "value": 7, "step": 1},
+        {"id": "f_val", "label": "Focal Length: ", "min": 0, "max": int(1.5 * img_height), "value": 150, "step": 1}
+    ],
+    "plot_endpoint": "/plot/6",
+    "banned_validation": True,
+    "extra_context": {"img_width": img_width}
+},
     "8": {
         "title": "Task 8 Interactive: Concave Mirror Model",
         "sliders": [
@@ -377,6 +346,7 @@ interactive_tasks = {
 ########################################
 # TASK OVERVIEW AND BUTTON LABELS (3-word descriptions)
 ########################################
+# These appear on the main page’s task buttons.
 task_overview = {
     "1": {
         "title": "Task 1",
@@ -513,7 +483,7 @@ main_page_template = '''
   <!-- Image Upload Form -->
   <div class="upload-form">
     <form method="POST" action="{{ url_for('upload') }}" enctype="multipart/form-data">
-      <label for="image_file">Upload Your Image:</label><br>
+      <label for="image_file">Upload Your Image (max dimension: {{ max_dimension }} px):</label><br>
       <input type="file" name="image_file" id="image_file" accept="image/*"><br>
       <button type="submit" class="upload-button">Upload</button>
     </form>
@@ -523,7 +493,7 @@ main_page_template = '''
 '''
 
 ########################################
-# SUBTASK PAGE TEMPLATE WITH NAVIGATION
+# SUBTASK PAGE TEMPLATE
 ########################################
 subtask_page_template = '''
 <!DOCTYPE html>
@@ -542,25 +512,10 @@ subtask_page_template = '''
     }
     .button:hover { background-color: #1e7e34; }
     .back-button {
-      padding: 15px 25px; background-color: #007BFF; color: white; border: none;
-      border-radius: 8px; font-size: 1.2em; cursor: pointer; margin-top: 20px;
+      background-color: #007BFF; color: white; padding: 15px 25px; border: none;
+      border-radius: 8px; font-size: 1.2em; text-decoration: none; margin-top: 20px;
     }
     .back-button:hover { background-color: #0056b3; }
-    .nav-buttons {
-      margin-top: 20px;
-      text-align: center;
-    }
-    .small-task-button {
-      padding: 5px 10px;
-      margin: 2px;
-      font-size: 0.8em;
-      border: none;
-      border-radius: 5px;
-      background-color: #007BFF;
-      color: #fff;
-      cursor: pointer;
-    }
-    .small-task-button:hover { background-color: #0056b3; }
   </style>
 </head>
 <body>
@@ -571,19 +526,14 @@ subtask_page_template = '''
          {{ subkey }}<br><span>{{ task_overview[subkey].button_text if task_overview.get(subkey) else "" }}</span>
       </a>
     {% endfor %}
-    <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
-    <div class="nav-buttons">
-      {% for key, task in task_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
-      {% endfor %}
-    </div>
+    <a class="back-button" href="{{ url_for('index') }}">Back to Home</a>
   </div>
 </body>
 </html>
 '''
 
 ########################################
-# DUMMY PAGE TEMPLATE (for Task 12) WITH NAVIGATION
+# DUMMY PAGE TEMPLATE (for Task 12)
 ########################################
 dummy_page_template = '''
 <!DOCTYPE html>
@@ -593,37 +543,17 @@ dummy_page_template = '''
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <style>
     body { font-family: Arial, sans-serif; background: #fff; padding: 20px; text-align: center; }
-    .button, .back-button {
+    .button {
       background-color: #007BFF; color: white; padding: 15px 25px; border: none;
-      border-radius: 8px; font-size: 1.2em; cursor: pointer; text-decoration: none; margin-top: 20px;
+      border-radius: 8px; font-size: 1.2em; text-decoration: none; margin-top: 20px;
     }
-    .button:hover, .back-button:hover { background-color: #0056b3; }
-    .nav-buttons {
-      margin-top: 20px;
-      text-align: center;
-    }
-    .small-task-button {
-      padding: 5px 10px;
-      margin: 2px;
-      font-size: 0.8em;
-      border: none;
-      border-radius: 5px;
-      background-color: #007BFF;
-      color: #fff;
-      cursor: pointer;
-    }
-    .small-task-button:hover { background-color: #0056b3; }
+    .button:hover { background-color: #0056b3; }
   </style>
 </head>
 <body>
   <h1>{{ title }}</h1>
   <p>{{ message }}</p>
-  <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
-  <div class="nav-buttons">
-      {% for key, task in task_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
-      {% endfor %}
-  </div>
+  <a class="button" href="{{ url_for('index') }}">Back to Home</a>
 </body>
 </html>
 '''
@@ -665,42 +595,24 @@ def handle_task(task_id):
             body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
             .back-button {
               background-color: #007BFF; color: white; padding: 15px 25px; border: none;
-              border-radius: 8px; font-size: 1.2em; cursor: pointer; margin-top: 20px;
+              border-radius: 8px; font-size: 1.2em; text-decoration: none; margin-top: 20px;
             }
             .back-button:hover { background-color: #0056b3; }
-            .nav-buttons {
-              margin-top: 20px;
-              text-align: center;
-            }
-            .small-task-button {
-              padding: 5px 10px;
-              margin: 2px;
-              font-size: 0.8em;
-              border: none;
-              border-radius: 5px;
-              background-color: #007BFF;
-              color: #fff;
-              cursor: pointer;
-            }
-            .small-task-button:hover { background-color: #0056b3; }
           </style>
         </head>
         <body>
           <h1>Task {{ task_id }}</h1>
           <img src="{{ url_for('plot_task', task_id=task_id) }}" style="max-width:800px;width:100%;">
           <br>
-          <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
-          <div class="nav-buttons">
-              {% for key, task in task_overview.items() %}
-                 <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
-              {% endfor %}
+          <div class="container">
+          <a class="back-button" href="{{ url_for('index') }}">Back to Home</a>
           </div>
         </body>
         </html>
         '''
-        return render_template_string(page, task_id=task_id, task_overview=task_overview)
+        return render_template_string(page, task_id=task_id)
     elif task_id == "12":
-        return render_template_string(dummy_page_template, title="Task 12", message="Not Implemented Yet", task_overview=task_overview)
+        return render_template_string(dummy_page_template, title="Task 12", message="Not Implemented Yet")
     else:
         return f"Task {task_id} is not defined.", 404
 
@@ -712,14 +624,11 @@ def interactive_task(task_id):
     if task_id in interactive_tasks:
         config = interactive_tasks[task_id]
         playable = config.get("playable", False)
-        # Ensure that tasks_overview is passed in extra context.
-        extra_context = config.get("extra_context", {}).copy()
-        extra_context["tasks_overview"] = task_overview
         return render_interactive_page(slider_config=config["sliders"],
                                        title=config["title"],
                                        plot_endpoint=config["plot_endpoint"],
                                        banned_validation=config.get("banned_validation", False),
-                                       extra_context=extra_context,
+                                       extra_context=config.get("extra_context", {}),
                                        playable=playable)
     else:
         return f"No interactive configuration defined for task {task_id}", 404
@@ -727,6 +636,7 @@ def interactive_task(task_id):
 ########################################
 # ROUTE: Plot Endpoint (for both Interactive and Static Tasks)
 ########################################
+
 
 ########################################
 # STATIC TASKS FUNCTIONS
@@ -910,6 +820,7 @@ def generate_task3_plot(v_log, n, y, l, request_id):
     try:
         # Convert the logarithmic slider value to an actual speed (m/s)
         v = 10 ** v_log  
+        # l is now in metres already
         l_scaled = l  
         x = np.linspace(0, l_scaled, 10000)
         check_interrupt("3", request_id)
@@ -918,7 +829,7 @@ def generate_task3_plot(v_log, n, y, l, request_id):
         plt.figure()
         plt.scatter(x[idx], t[idx], color="red", zorder=2)
         plt.plot(x, t, zorder=1)
-        plt.title(f"Minimum at x = {float(x[idx]):.3g}; l/2 = {float(l_scaled/2):.3g}")
+        plt.title(f"Minimum at x={round(x[idx],5)}; l/2 = {round(l_scaled/2,5)}")
         plt.xlabel("x (m)")
         plt.ylabel("t (s)")
         buf = io.BytesIO()
@@ -940,8 +851,9 @@ def generate_task4_plot(v_log, n1, n2, y, l, request_id):
         idx = np.argmin(t)
         theta1 = np.arctan(x[idx] / y)
         theta2 = np.arctan((l_scaled - x[idx]) / y)
-        title_text = (r"$\sin(\theta_1)/(v/n_1) = " + f"{np.sin(theta1)/(v/n1):.3g}" +
-                      r",\quad \sin(\theta_2)/(v/n_2) = " + f"{np.sin(theta2)/(v/n2):.3g}" + r"$")
+        # Create a LaTeX-formatted title with equals signs
+        title_text = (r"$\sin(\theta_1)/(v/n_1) = " + f"{round(np.sin(theta1)/(v/n1),15)}" +
+                      r",\quad \sin(\theta_2)/(v/n_2) = " + f"{round(np.sin(theta2)/(v/n2),15)}" + r"$")
         plt.figure()
         plt.scatter(x[idx], t[idx], color="red", zorder=2)
         plt.plot(x, t, zorder=1)
@@ -960,27 +872,29 @@ def generate_task4_plot(v_log, n1, n2, y, l, request_id):
 def generate_task5_plot(offset_x, offset_y, canvas_size, request_id):
     try:
         S = canvas_size
+        # Flip y-direction (increasing offset_y moves image upward)
         center_x = S // 2
-        # Change vertical placement: use addition so that the offset shifts the image.
-        center_y = S // 2 + offset_y
+        center_y = S // 2 - offset_y
         canvas = np.full((S, S, global_image.shape[2]), 255, dtype=np.uint8)
         for y in range(H):
             if y % 10 == 0:
                 check_interrupt("5", request_id)
             for x in range(W):
                 colour = global_image[y, x]
-                old_x = center_x + S // 4 + x + offset_x
-                old_y = center_y - H // 2 + y
-                new_x = center_x - S // 4 - x - offset_x
-                new_y = center_y - H // 2 + y
+                # Compute positions for two copies of the image
+                old_x = center_x + S//4 + x + offset_x
+                old_y = center_y - H//2 + y
+                new_x = center_x - S//4 - x - offset_x
+                new_y = center_y - H//2 + y
                 if 0 <= old_x < S and 0 <= old_y < S:
                     canvas[old_y, old_x] = colour
                 if 0 <= new_x < S and 0 <= new_y < S:
                     canvas[new_y, new_x] = colour
-        plt.figure(figsize=(6, 6))
+        plt.figure(figsize=(6,6))
+        # Use pixel-based extent
         plt.imshow(canvas, extent=[0, S, 0, S])
-        plt.axvline(x=S / 2, color="black", linestyle="--")
-        plt.title(f"Offset X = {offset_x} px, Offset Y = {offset_y} px; Canvas Size = {S} px")
+        plt.axvline(x=S/2, color="black", linestyle="--")
+        plt.title(f"Start X: {offset_x} px, Start Y: {offset_y} px; Canvas Size: {S} px")
         buf = io.BytesIO()
         plt.savefig(buf, format="png")
         plt.close()
@@ -1186,64 +1100,52 @@ def generate_task9_plot(start_x, start_y, rad_multiplier, request_id):
 def generate_task10_plot(Rf, arc_angle, request_id):
     try:
         plt.close('all')
-        # Compute the inscribed radius of the image.
+        # Compute the radius that inscribes the image.
         inscribed_radius = isqrt(int((img_width / 2) ** 2 + (img_height / 2) ** 2))
-        # Set the center so the image is centered at the bottom.
-        x_center = 0
-        y_center = -img_height / 2
-        start_angle = 1.5 * pi - np.deg2rad(arc_angle) / 2
-        end_angle = 1.5 * pi + np.deg2rad(arc_angle) / 2
-        fig, ax = plt.subplots()
-        R_max = Rf + 1
+        # Use center = (0, y_center) with y_center = -img_height/2
+        canvas_size = int(inscribed_radius * (2 * Rf + 2))
+        fig, ax = plt.subplots(figsize=(8,8))
+        canvas = np.full((canvas_size, canvas_size, global_image.shape[2]), 255, dtype=np.uint8)
+        ax.imshow(canvas, extent=[-canvas_size/2, canvas_size/2, -canvas_size/2, canvas_size/2])
+        # Also display the image (centered) using its inscribed dimensions.
+        ax.imshow(global_image, extent=[-img_width/2, img_width/2, -img_height/2, img_height/2])
+        # Draw the inscribing circle.
+        circle = plt.Circle((0, 0), inscribed_radius, color="gray", fill=False, linewidth=1)
+        ax.add_artist(circle)
+        # For each row in the image, generate an arc with interpolated colors.
+        arc_angle_rad = np.deg2rad(arc_angle)
+        start_angle = pi * 1.5 - arc_angle_rad / 2
+        end_angle = pi * 1.5 + arc_angle_rad / 2
+        R_f_slider = Rf  # anamorphic projection factor from slider.
         for row_index in range(img_height):
             if row_index % 5 == 0:
                 check_interrupt("10", request_id)
-            # R_here scales the arc radius for each image row
-            fineness = 300
-            R_here = Rf * ((img_height - row_index - 1) / img_height) + 1
-            theta = np.linspace(start_angle, end_angle, fineness)
+            R_here = R_f_slider * ((img_height - row_index - 1) / img_height) + 1
+            theta = np.linspace(start_angle, end_angle, 300)
+            x_center = 0
+            y_center = -img_height / 2  # New center: negative half the image height
             arc_x = x_center + inscribed_radius * R_here * np.cos(theta)
             arc_y = y_center + inscribed_radius * R_here * np.sin(theta)
-            # Build segments from adjacent arc points
-            segments = []
+            points = np.array([arc_x, arc_y]).T.reshape(-1, 1, 2)
+            segments = np.concatenate([points[:-1], points[1:]], axis=1)
+            # Interpolate color from the corresponding row of the image
+            row_data = global_image[row_index]
+            if row_data.max() > 1:
+                row_data = row_data / 255.0
+            interp_indices = np.linspace(0, img_width - 1, len(theta))
+            segment_colors = []
             for i in range(len(theta) - 1):
-                segments.append(((arc_x[i], arc_y[i]), (arc_x[i + 1], arc_y[i + 1])))
-            # Get the row (row_index) from the image and interpolate it to 300 points
-            row_pixels = global_image[row_index, :, :]  # shape: (img_width, channels)
-            interp_indices = np.linspace(0, img_width - 1, fineness)
-            interp_colors = np.zeros((fineness, 3))
-            for ch in range(3):
-                interp_colors[:, ch] = np.interp(interp_indices, np.arange(img_width), row_pixels[:, ch])
-            # Normalize to 0-1 (assuming 0-255 image)
-            interp_colors_norm = interp_colors / 255.0
-            # Compute a color per segment by averaging adjacent interpolated colors.
-            seg_colors = (interp_colors_norm[:-1] + interp_colors_norm[1:]) / 2
-            lc = LineCollection(segments, colors=seg_colors, linewidth=3)
+                pos = interp_indices[i]
+                color = []
+                for ch in range(row_data.shape[1]):
+                    c = np.interp(pos, np.arange(img_width), row_data[:, ch])
+                    color.append(c)
+                segment_colors.append(color + [1])
+            lc = LineCollection(segments, colors=segment_colors, linewidth=3)
             ax.add_collection(lc)
-        # Set up a white background and draw the original image for reference.
-        extent = [-img_width // 2, img_width // 2, -img_height // 2, img_height // 2]
-        minimum_x = x_center - inscribed_radius * R_max
-        maximum_x = x_center + inscribed_radius * R_max
-        minimum_y = y_center - inscribed_radius * R_max
-        maximum_y = y_center + inscribed_radius * R_max
-        xtent = max(abs(minimum_x), abs(maximum_x))
-        ytent = max(abs(minimum_y), abs(maximum_y))
-        xtent = int(xtent)+1
-        ytent = int(ytent)+1
-        xtent *= 2
-        ytent *= 2
-        canvas_extent = [-xtent//2-2, xtent//2+2, -ytent//2-2, ytent//2+2]
-        canvas = np.full((canvas_extent[1]-canvas_extent[0],canvas_extent[3]-canvas_extent[2], global_image.shape[2]), 255, dtype=np.uint8)
-        ax.imshow(canvas, extent=canvas_extent)
-        ax.imshow(global_image, extent=extent)
-        # Draw a guiding semicircular outline.
-        circle = plt.Circle((0, 0), inscribed_radius, color="gray", fill=False, linewidth=1)
-        ax.add_artist(circle)
-        # Draw a small red star at the center bottom of the image.
-        ax.scatter(0, -img_height / 2, color="red", marker="*", s=100)
-        ax.set_xlim(canvas_extent[0], canvas_extent[1])
-        ax.set_ylim(canvas_extent[2], canvas_extent[3])
-        ax.set_title(f"Task 10: Anamorphic Projection (R_f = {Rf:.3g}, Arc Angle = {arc_angle:.3g}°)")
+        ax.set_xlim(-canvas_size/2, canvas_size/2)
+        ax.set_ylim(-canvas_size/2, canvas_size/2)
+        ax.set_title(f"Task 10: Anamorphic Projection (R_f = {Rf}, Arc Angle = {arc_angle}°)")
         ax.axis("on")
         buf = io.BytesIO()
         plt.savefig(buf, format="png")
@@ -1334,13 +1236,21 @@ def upload():
     h, w = img.shape[0], img.shape[1]
     
     if h > MAX_DIMENSION or w > MAX_DIMENSION:
+        # Simple downscale: factor
         factor = max(h, w) / MAX_DIMENSION
         new_h, new_w = int(h / factor), int(w / factor)
+        
+        # Resize the image with anti-aliasing
+        from skimage.transform import resize
         img = resize(img, (new_h, new_w), anti_aliasing=True)
-        if img.min() >= 0 and img.max() <= 1:
+        
+        # Convert to uint8 format based on value range
+        if img.min() >= 0 and img.max() <= 1:  # Float range [0, 1]
             img = (img * 255).clip(0, 255).astype(np.uint8)
-        else:
+        else:  # Assume uint8 or other range
             img = img.clip(0, 255).astype(np.uint8)
+        
+        print(img)
     
     global_image = img
     img_height, img_width, channels = global_image.shape
@@ -1358,20 +1268,20 @@ def plot_task(task_id):
         active_requests[task_id] = req_id
         try:
             if task_id == "3":
-                v = float(request.args.get("v", 8.48))
+                v = float(request.args.get("v", 300000000))
                 n = float(request.args.get("n", 1))
                 y_val = float(request.args.get("y", 1))
                 l = float(request.args.get("l", 100))
                 buf = generate_task3_plot(v, n, y_val, l, req_id)
             elif task_id == "4":
-                v = float(request.args.get("v", 8.48))
+                v = float(request.args.get("v", 300000000))
                 n1 = float(request.args.get("n1", 1))
                 n2 = float(request.args.get("n2", 1))
                 y_val = float(request.args.get("y", 1))
                 l = float(request.args.get("l", 100))
                 buf = generate_task4_plot(v, n1, n2, y_val, l, req_id)
             elif task_id == "5":
-                offset_x = int(request.args.get("offset_x", int(img_width/2)+1))
+                offset_x = int(request.args.get("offset_x", 0))
                 offset_y = int(request.args.get("offset_y", 0))
                 canvas_size = int(request.args.get("canvas_size", int(4*max(W,H))))
                 buf = generate_task5_plot(offset_x, offset_y, canvas_size, req_id)
