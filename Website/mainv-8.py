@@ -11,6 +11,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection
 from matplotlib.colors import LinearSegmentedColormap
+from werkzeug.utils import secure_filename
 from skimage.transform import resize
 
 app = Flask(__name__)
@@ -25,6 +26,7 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 ########################################
 # GLOBAL INTERRUPT MANAGEMENT
 ########################################
+# For each interactive task, store latest request ID.
 active_requests = {}  # e.g. {"3": request_id, "6": request_id, ...}
 
 def check_interrupt(task_key, request_id):
@@ -34,6 +36,7 @@ def check_interrupt(task_key, request_id):
 ########################################
 # GLOBAL IMAGE LOADING
 ########################################
+# Load a default image. (User may upload a new image via the upload form.)
 DEFAULT_IMAGE = "Tall1.jpg"
 def load_global_image(filename):
     if os.path.exists(filename):
@@ -63,131 +66,6 @@ def generate_blank_image():
     plt.close(fig)
     buf.seek(0)
     return buf
-
-########################################
-# HELPER FUNCTIONS FOR TASK 12 (PRISM MODEL)
-########################################
-def color(f):
-    if 405e12 <= f < 480e12:
-        return (1, 0, 0)
-    elif 480e12 <= f < 510e12:
-        return (1, 127/255, 0)
-    elif 510e12 <= f < 530e12:
-        return (1, 1, 0)
-    elif 530e12 <= f < 600e12:
-        return (0, 1, 0)
-    elif 600e12 <= f < 620e12:
-        return (0, 1, 1)
-    elif 620e12 <= f < 680e12:
-        return (0, 0, 1)
-    else:
-        return (137/255, 0, 1)
-
-def triangle(ax, alpha):
-    base_length = 2 * np.sin(alpha / 2)
-    left_vertex = (-base_length/2, 0)
-    right_vertex = (base_length/2, 0)
-    height = np.cos(alpha / 2)
-    top_vertex = (0, height)
-    vertices = [left_vertex, top_vertex, right_vertex, left_vertex]
-    x_coords, y_coords = zip(*vertices)
-    ax.plot(x_coords, y_coords, 'r-', linewidth=2)
-
-def GetRefractIndex(wavelength):
-    x = wavelength * 1e6  # convert to micrometers
-    a = np.array([1.03961212, 0.231792344, 1.01146945])
-    b = np.array([0.00600069867, 0.0200179144, 103.560653])
-    y = np.zeros_like(x)
-    for i in range(len(a)):
-        y += (a[i] * (x**2)) / ((x**2) - b[i])
-    return np.sqrt(1 + y)
-
-def GetAcoords(ThetaI, alpha, x1, y1):
-    x2 = -np.cos(ThetaI - alpha/2) + x1
-    y2 = -np.sin(ThetaI - alpha/2) + y1
-    return x2, y2
-
-def GetCcoords(Lambda, phi):
-    x = ((np.sin(Lambda) + np.cos(Lambda)*np.tan(phi)) / 2) / (np.tan(Lambda) - np.tan(phi))
-    y = -np.tan(Lambda) * x + np.sin(Lambda)
-    return x, y
-
-def GetDcoords(angle, alpha, x1, y1):
-    x2 = x1 + np.cos(angle - alpha/2)
-    y2 = y1 - np.sin(angle - alpha/2)
-    return x2, y2
-
-########################################
-# NEW TASK 12 PLOT FUNCTION (Dynamic Prism Model)
-########################################
-def generate_task12_plot(ThetaI_deg, alpha_deg, request_id):
-    try:
-        # Convert slider values from degrees to radians.
-        ThetaI = np.deg2rad(ThetaI_deg)
-        alpha = np.deg2rad(alpha_deg)
-        Lambda = (np.pi/2) - alpha/2
-
-        # Generate frequency and corresponding wavelength arrays.
-        frequency = np.linspace(405e12, 790e12, 500)
-        wavelength = 3e8 / frequency
-        n = GetRefractIndex(wavelength)
-
-        # For the first interface (air -> prism):
-        # Assume the normal to the left face is at N_left.
-        N_left = np.pi - alpha/2
-        theta_inc1 = np.abs(ThetaI - N_left)
-        # Make it the acute angle.
-        theta_inc1 = np.where(theta_inc1 > np.pi/2, np.pi - theta_inc1, theta_inc1)
-        beta = np.arcsin(np.sin(theta_inc1) / n)
-
-        # Inside the prism, the ray direction (absolute angle) is given by:
-        d = N_left - beta
-
-        # Compute incidence at the second interface (right face, whose normal is at alpha/2).
-        theta_inc2 = np.abs(d - (alpha/2))
-        theta_inc2 = np.where(theta_inc2 > np.pi/2, np.pi - theta_inc2, theta_inc2)
-        # Now decide: if n*sin(theta_inc2) <= 1 then refraction occurs, otherwise total internal reflection.
-        exit_angle = np.where(n * np.sin(theta_inc2) <= 1,
-                                np.arcsin(n * np.sin(theta_inc2)),
-                                -theta_inc2)
-
-        # Compute beam segment coordinates.
-        # Use constant arrays for starting positions (mimicking the original code).
-        Xb = np.linspace(-np.cos(Lambda)/2, -np.cos(Lambda)/2, 500)
-        Yb = np.linspace(np.sin(Lambda)/2, np.sin(Lambda)/2, 500)
-        Xa, Ya = GetAcoords(ThetaI, alpha, Xb, Yb)
-        Xc, Yc = GetCcoords(Lambda, theta_inc2)
-        Xd, Yd = GetDcoords(exit_angle, alpha, Xc, Yc)
-
-        # Generate line segments for the three parts of the light path.
-        segments_incident = np.array([[[xa, ya], [xb, yb]] for xa, ya, xb, yb in zip(Xa, Ya, Xb, Yb)])
-        segments_internal = np.array([[[xb, yb], [xc, yc]] for xb, yb, xc, yc in zip(Xb, Yb, Xc, Yc)])
-        segments_exit = np.array([[[xc, yc], [xd, yd]] for xc, yc, xd, yd in zip(Xc, Yc, Xd, Yd)])
-
-        # Colors for each wavelength.
-        colors = [color(f) for f in frequency]
-
-        fig, ax = plt.subplots(figsize=(8, 6), facecolor="black")
-        ax.set_facecolor("black")
-        # Draw the incident ray in white.
-        lc_incident = LineCollection(segments_incident, colors="white", alpha=0.5, linewidths=1)
-        # Internal and exit segments use dispersion colors.
-        lc_internal = LineCollection(segments_internal, colors=colors, alpha=0.5, linewidths=0.5)
-        lc_exit = LineCollection(segments_exit, colors=colors, alpha=0.5, linewidths=0.5)
-        ax.add_collection(lc_incident)
-        ax.add_collection(lc_internal)
-        ax.add_collection(lc_exit)
-        triangle(ax, alpha)
-        ax.set_xlim(-2, 2)
-        ax.set_ylim(-0.5, 2)
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png")
-        plt.close(fig)
-        buf.seek(0)
-        return buf
-    except Exception as e:
-        logging.info("Task 12 aborted: " + str(e))
-        return generate_blank_image()
 
 ########################################
 # INTERACTIVE TEMPLATE WITH SPINNER, ANIMATION, AND NAVIGATION
@@ -346,40 +224,19 @@ interactive_template = '''
         document.getElementById("{{ slider.id }}").addEventListener("input", updatePlot);
       {% endif %}
     {% endfor %}
-    // Add keypress functionality to all sliders.
-    document.querySelectorAll('input[type=range]').forEach(function(slider) {
-      slider.addEventListener("keydown", function(e) {
-         let step = parseFloat(slider.step);
-         let value = parseFloat(slider.value);
-         let min = parseFloat(slider.min);
-         let max = parseFloat(slider.max);
-         if(e.key === "ArrowRight" || e.key === "ArrowUp"){
-             value = Math.min(max, value + step);
-             slider.value = value;
-             document.getElementById(slider.id + "_value").innerText = parseFloat(value).toPrecision(3);
-             updatePlot();
-             e.preventDefault();
-         } else if(e.key === "ArrowLeft" || e.key === "ArrowDown"){
-             value = Math.max(min, value - step);
-             slider.value = value;
-             document.getElementById(slider.id + "_value").innerText = parseFloat(value).toPrecision(3);
-             updatePlot();
-             e.preventDefault();
-         }
-      });
-    });
     document.getElementById("plotImage").addEventListener("load", function() {
       document.getElementById("spinner").style.display = "none";
       document.getElementById("loadingText").style.display = "none";
     });
     {% if playable %}
+      // Animation code: slow the animation (e.g., 1000 ms per step) and clear any existing animation.
       var currentAnimation = null;
       document.getElementById("playButton").addEventListener("click", function() {
          if (currentAnimation) { clearInterval(currentAnimation); }
          var slider = document.getElementById("{{ sliders[0].id }}");
          var startVal = parseFloat(slider.min);
          var endVal = parseFloat(slider.max);
-         var interval = 1000;
+         var interval = 1000; // 1 second per step
          slider.value = startVal;
          document.getElementById("{{ sliders[0].id }}_value").innerText = parseFloat(startVal).toPrecision(3);
          updatePlot();
@@ -402,7 +259,7 @@ interactive_template = '''
   <div class="nav-buttons">
       <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
       {% for key, task in tasks_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{% if task.subtasks|length > 0 %}{{ url_for('subtask_page', task_id=key) }}{% else %}{{ url_for('handle_task', task_id=key) }}{% endif %}'">{{ task.title }}</button>
+         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
       {% endfor %}
   </div>
 </body>
@@ -412,6 +269,7 @@ interactive_template = '''
 def render_interactive_page(slider_config, title, plot_endpoint, banned_validation=False, extra_context=None, playable=False):
     if extra_context is None:
         extra_context = {}
+    # Add tasks_overview to context for navigation
     extra_context["tasks_overview"] = task_overview
     initial_params = { slider["id"]: slider["value"] for slider in slider_config }
     initial_query = "&".join([f"{key}={value}" for key, value in initial_params.items()])
@@ -513,15 +371,6 @@ interactive_tasks = {
         "plot_endpoint": "/plot/11d",
         "banned_validation": False,
         "playable": True
-    },
-    "12": {
-        "title": "Task 12 Interactive: Prism Light Path",
-        "sliders": [
-            {"id": "ThetaI", "label": "Incident Angle (deg)", "min": 0, "max": 90, "value": 45, "step": 1},
-            {"id": "alpha", "label": "Prism Apex Angle (deg)", "min": 1, "max": 90, "value": 45, "step": 1}
-        ],
-        "plot_endpoint": "/plot/12",
-        "banned_validation": False
     }
 }
 
@@ -618,7 +467,7 @@ task_overview = {
     },
     "12": {
         "title": "Task 12",
-        "desc": "Dynamic model of a beam of white light through a triangular prism.",
+        "desc": "Dynamic model of a beam of white light through a triangular prism. (Not implemented yet.)",
         "subtasks": {},
         "button_text": "Prism Light Path"
     }
@@ -725,7 +574,7 @@ subtask_page_template = '''
     <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
     <div class="nav-buttons">
       {% for key, task in task_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{% if task.subtasks|length > 0 %}{{ url_for('subtask_page', task_id=key) }}{% else %}{{ url_for('handle_task', task_id=key) }}{% endif %}'">{{ task.title }}</button>
+         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
       {% endfor %}
     </div>
   </div>
@@ -734,7 +583,7 @@ subtask_page_template = '''
 '''
 
 ########################################
-# DUMMY PAGE TEMPLATE (for Static Tasks or Task 12 before integration)
+# DUMMY PAGE TEMPLATE (for Task 12) WITH NAVIGATION
 ########################################
 dummy_page_template = '''
 <!DOCTYPE html>
@@ -772,7 +621,7 @@ dummy_page_template = '''
   <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
   <div class="nav-buttons">
       {% for key, task in task_overview.items() %}
-         <button class="small-task-button" onclick="window.location.href='{% if task.subtasks|length > 0 %}{{ url_for('subtask_page', task_id=key) }}{% else %}{{ url_for('handle_task', task_id=key) }}{% endif %}'">{{ task.title }}</button>
+         <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
       {% endfor %}
   </div>
 </body>
@@ -843,7 +692,7 @@ def handle_task(task_id):
           <button class="back-button" onclick="window.location.href='{{ url_for('index') }}'">Back to Home</button>
           <div class="nav-buttons">
               {% for key, task in task_overview.items() %}
-                 <button class="small-task-button" onclick="window.location.href='{% if task.subtasks|length > 0 %}{{ url_for('subtask_page', task_id=key) }}{% else %}{{ url_for('handle_task', task_id=key) }}{% endif %}'">{{ task.title }}</button>
+                 <button class="small-task-button" onclick="window.location.href='{{ url_for('handle_task', task_id=key) }}'">{{ task.title }}</button>
               {% endfor %}
           </div>
         </body>
@@ -851,8 +700,7 @@ def handle_task(task_id):
         '''
         return render_template_string(page, task_id=task_id, task_overview=task_overview)
     elif task_id == "12":
-        # With Task 12 now interactive, redirect to interactive task.
-        return redirect(url_for('interactive_task', task_id="12"))
+        return render_template_string(dummy_page_template, title="Task 12", message="Not Implemented Yet", task_overview=task_overview)
     else:
         return f"Task {task_id} is not defined.", 404
 
@@ -864,6 +712,7 @@ def interactive_task(task_id):
     if task_id in interactive_tasks:
         config = interactive_tasks[task_id]
         playable = config.get("playable", False)
+        # Ensure that tasks_overview is passed in extra context.
         extra_context = config.get("extra_context", {}).copy()
         extra_context["tasks_overview"] = task_overview
         return render_interactive_page(slider_config=config["sliders"],
@@ -874,6 +723,10 @@ def interactive_task(task_id):
                                        playable=playable)
     else:
         return f"No interactive configuration defined for task {task_id}", 404
+
+########################################
+# ROUTE: Plot Endpoint (for both Interactive and Static Tasks)
+########################################
 
 ########################################
 # STATIC TASKS FUNCTIONS
@@ -1055,6 +908,7 @@ def generate_task11c_plot():
 ########################################
 def generate_task3_plot(v_log, n, y, l, request_id):
     try:
+        # Convert the logarithmic slider value to an actual speed (m/s)
         v = 10 ** v_log  
         l_scaled = l  
         x = np.linspace(0, l_scaled, 10000)
@@ -1107,6 +961,7 @@ def generate_task5_plot(offset_x, offset_y, canvas_size, request_id):
     try:
         S = canvas_size
         center_x = S // 2
+        # Change vertical placement: use addition so that the offset shifts the image.
         center_y = S // 2 + offset_y
         canvas = np.full((S, S, global_image.shape[2]), 255, dtype=np.uint8)
         for y in range(H):
@@ -1290,9 +1145,9 @@ def generate_task9_plot(start_x, start_y, rad_multiplier, request_id):
                 old_x = x + start_x
                 old_y = y + start_y
                 try:
-                    alpha_angle = 0.5*np.arctan(old_y/old_x)
-                    k = old_x/np.cos(2*alpha_angle)
-                    new_y = int(k*np.sin(alpha_angle)/((k/rad) - np.cos(alpha_angle) + (old_x*np.sin(alpha_angle)/old_y)))
+                    alpha = 0.5*np.arctan(old_y/old_x)
+                    k = old_x/np.cos(2*alpha)
+                    new_y = int(k*np.sin(alpha)/((k/rad) - np.cos(alpha) + (old_x*np.sin(alpha)/old_y)))
                     new_x = int(old_x*new_y/old_y)
                 except:
                     new_y = 0
@@ -1331,7 +1186,9 @@ def generate_task9_plot(start_x, start_y, rad_multiplier, request_id):
 def generate_task10_plot(Rf, arc_angle, request_id):
     try:
         plt.close('all')
+        # Compute the inscribed radius of the image.
         inscribed_radius = isqrt(int((img_width / 2) ** 2 + (img_height / 2) ** 2))
+        # Set the center so the image is centered at the bottom.
         x_center = 0
         y_center = -img_height / 2
         start_angle = 1.5 * pi - np.deg2rad(arc_angle) / 2
@@ -1341,23 +1198,29 @@ def generate_task10_plot(Rf, arc_angle, request_id):
         for row_index in range(img_height):
             if row_index % 5 == 0:
                 check_interrupt("10", request_id)
+            # R_here scales the arc radius for each image row
             fineness = 300
             R_here = Rf * ((img_height - row_index - 1) / img_height) + 1
             theta = np.linspace(start_angle, end_angle, fineness)
             arc_x = x_center + inscribed_radius * R_here * np.cos(theta)
             arc_y = y_center + inscribed_radius * R_here * np.sin(theta)
+            # Build segments from adjacent arc points
             segments = []
             for i in range(len(theta) - 1):
                 segments.append(((arc_x[i], arc_y[i]), (arc_x[i + 1], arc_y[i + 1])))
-            row_pixels = global_image[row_index, :, :]
+            # Get the row (row_index) from the image and interpolate it to 300 points
+            row_pixels = global_image[row_index, :, :]  # shape: (img_width, channels)
             interp_indices = np.linspace(0, img_width - 1, fineness)
             interp_colors = np.zeros((fineness, 3))
             for ch in range(3):
                 interp_colors[:, ch] = np.interp(interp_indices, np.arange(img_width), row_pixels[:, ch])
+            # Normalize to 0-1 (assuming 0-255 image)
             interp_colors_norm = interp_colors / 255.0
+            # Compute a color per segment by averaging adjacent interpolated colors.
             seg_colors = (interp_colors_norm[:-1] + interp_colors_norm[1:]) / 2
             lc = LineCollection(segments, colors=seg_colors, linewidth=3)
             ax.add_collection(lc)
+        # Set up a white background and draw the original image for reference.
         extent = [-img_width // 2, img_width // 2, -img_height // 2, img_height // 2]
         minimum_x = x_center - inscribed_radius * R_max
         maximum_x = x_center + inscribed_radius * R_max
@@ -1373,8 +1236,10 @@ def generate_task10_plot(Rf, arc_angle, request_id):
         canvas = np.full((canvas_extent[1]-canvas_extent[0],canvas_extent[3]-canvas_extent[2], global_image.shape[2]), 255, dtype=np.uint8)
         ax.imshow(canvas, extent=canvas_extent)
         ax.imshow(global_image, extent=extent)
+        # Draw a guiding semicircular outline.
         circle = plt.Circle((0, 0), inscribed_radius, color="gray", fill=False, linewidth=1)
         ax.add_artist(circle)
+        # Draw a small red star at the center bottom of the image.
         ax.scatter(0, -img_height / 2, color="red", marker="*", s=100)
         ax.set_xlim(canvas_extent[0], canvas_extent[1])
         ax.set_ylim(canvas_extent[2], canvas_extent[3])
@@ -1464,6 +1329,7 @@ def upload():
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     file.save(filepath)
     
+    # Read the image
     img = plt.imread(filepath)
     h, w = img.shape[0], img.shape[1]
     
@@ -1532,10 +1398,6 @@ def plot_task(task_id):
             elif task_id == "11d":
                 alpha = float(request.args.get("alpha", 0))
                 buf = generate_task11d_plot(alpha, req_id)
-            elif task_id == "12":
-                ThetaI = float(request.args.get("ThetaI", 45))
-                alpha_val = float(request.args.get("alpha", 45))
-                buf = generate_task12_plot(ThetaI, alpha_val, req_id)
             else:
                 return "Interactive task not implemented", 404
             return send_file(buf, mimetype="image/png")
