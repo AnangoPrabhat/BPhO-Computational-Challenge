@@ -2049,7 +2049,7 @@ def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, p
         x_obj_corners = np.linspace(obj_left_x, obj_left_x + obj_world_width, W_obj_img + 1)
         y_obj_corners = np.linspace(obj_center_y + obj_world_height / 2, obj_center_y - obj_world_height / 2, H_obj_img + 1)
         x_o_mesh, y_o_mesh = np.meshgrid(x_obj_corners, y_obj_corners)
-        x_i_flat, y_i_flat = transform_points_spherical_aberration_t8(x_o_mesh.flatten(), y_o_mesh.flatten(), R_val)
+        x_i_flat, y_i_flat = transform_points_spherical_aberration_t8_thales(x_o_mesh.flatten(), y_o_mesh.flatten(), R_val)
         x_i_mesh, y_i_mesh = x_i_flat.reshape(x_o_mesh.shape), y_i_flat.reshape(y_o_mesh.shape)
 
         fig = Figure(figsize=(9, 7)); ax = fig.add_subplot(111)
