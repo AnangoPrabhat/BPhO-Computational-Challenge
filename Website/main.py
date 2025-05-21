@@ -26,7 +26,7 @@ UPLOAD_FOLDER = './uploads'
 STATIC_FOLDER = './static'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True) # Ensure static folder exists
-MAX_DIMENSION = 100  # maximum width or height (in pixels)
+MAX_DIMENSION = 120  # maximum width or height (in pixels)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # --- Ensure dummy logo and optics images exist in ./static for testing if not provided by user ---
@@ -976,7 +976,7 @@ main_page_template = '''
   
   <div class="upload-form">
     <form method="POST" action="{{ url_for('upload_file') }}" enctype="multipart/form-data">
-      <label for="image_file">Upload Image (max {{ max_dimension }}px side):</label><br>
+      <label for="image_file">Upload Image (reduced to {{ max_dimension }}px side):</label><br>
       <input type="file" name="image_file" id="image_file" accept="image/*" style="margin-top:10px; display:block; margin-left:auto; margin-right:auto;"><br>
       <button type="submit" class="upload-button">Upload and Resize</button>
     </form>
@@ -1218,22 +1218,42 @@ def generate_task1b_plot():
     return buf
 
 def generate_task2_plot():
-    u_cm = np.array([20, 25, 30, 35, 40, 45, 50, 55]) 
-    v_cm = np.array([65.5,40,31,27,25,23.1,21.5,20.5]) 
+    u_cm = np.array([20, 25, 30, 35, 40, 45, 50, 55])
+    v_cm = np.array([65.5,40,31,27,25,23.1,21.5,20.5])
     inv_u = 1.0 / u_cm
     inv_v = 1.0 / v_cm
-    m, c = np.polyfit(inv_u, inv_v, 1) 
-    
+
+    # Perform linear regression
+    m, c = np.polyfit(inv_u, inv_v, 1)
+
+    # Calculate R^2 value
+    # 1. Calculate the predicted y values using the linear fit
+    inv_v_pred = m * inv_u + c
+    # 2. Calculate the sum of squares of residuals (SS_res)
+    ss_res = np.sum((inv_v - inv_v_pred)**2)
+    # 3. Calculate the total sum of squares (SS_tot)
+    ss_tot = np.sum((inv_v - np.mean(inv_v))**2)
+    # 4. Calculate R^2
+    #   Handle the case where ss_tot is zero to avoid division by zero,
+    #   though unlikely with this data. If ss_tot is 0, it means all inv_v are the same.
+    if ss_tot == 0:
+        r_squared = 1.0 if ss_res == 0 else 0.0 # Perfect fit if ss_res is also 0, otherwise no fit
+    else:
+        r_squared = 1 - (ss_res / ss_tot)
+
     fig = Figure(figsize=(8,5))
     ax = fig.add_subplot(111)
     ax.scatter(inv_u, inv_v, color="red", zorder=2, label="Data Points")
-    ax.plot(inv_u, m * inv_u + c, zorder=1, label=f"Fit: y={m:.3f}x + {c:.3f}")
+    # Update the label for the fit line to include R^2
+    ax.plot(inv_u, m * inv_u + c, zorder=1, label=f"Fit: y={m:.3f}x + {c:.3f}\nR² = {r_squared:.4f}")
+
     f_calc = 1/c if c!=0 else float('inf')
     ax.set_title(f"Thin Lens: 1/v vs 1/u (Calculated f ≈ {f_calc:.2f} cm)")
     ax.set_xlabel("1/u (cm⁻¹)")
     ax.set_ylabel("1/v (cm⁻¹)")
     ax.legend()
     ax.grid(True, linestyle=":", alpha=0.6)
+
     buf = io.BytesIO()
     FigureCanvas(fig).print_png(buf)
     buf.seek(0)
@@ -1682,8 +1702,8 @@ def generate_task6_plot(start_x_obj_dist, start_y_obj_from_slider, scale_val, f_
         canvas_dim_heuristic = max(diag_obj * scale_val, abs(f_val_lens) * 4, abs(start_x_obj_dist)*2) * 1.5
         canvas_height = int(canvas_dim_heuristic)
         canvas_width = int(canvas_dim_heuristic * 1.2) 
-        canvas_height = max(canvas_height, 100) 
-        canvas_width = max(canvas_width, 100)  
+        canvas_height = max(canvas_height, 120) 
+        canvas_width = max(canvas_width, 120)  
 
         plot_canvas = np.ones((canvas_height, canvas_width, num_channels_on_canvas), dtype=np.float32) 
 
@@ -1807,56 +1827,215 @@ def generate_task6_plot(start_x_obj_dist, start_y_obj_from_slider, scale_val, f_
         logging.error(f"Task 6 plot error: {e}", exc_info=True)
         return generate_blank_image() 
 
-def transform_points_spherical_aberration_t8(x_o_flat, y_o_flat, R_mirror):
+
+
+import numpy as np
+
+def transform_points_spherical_aberration_t8_thales(x_o_flat, y_o_flat, R_mirror):
+    """
+    Calculates image coordinates for object points formed by a spherical mirror,
+    using the Thales derivation for the general off-axis case.
+    The coordinate system origin is the Center of Curvature (C) of the mirror.
+
+    Args:
+        x_o_flat (np.ndarray): Flattened array of object x-coordinates.
+        y_o_flat (np.ndarray): Flattened array of object y-coordinates.
+        R_mirror (float): Radius of curvature of the spherical mirror.
+
+    Returns:
+        tuple[np.ndarray, np.ndarray]: Flattened arrays of image x and y coordinates.
+    """
     x_i_flat = np.full_like(x_o_flat, np.nan)
     y_i_flat = np.full_like(y_o_flat, np.nan)
-    if R_mirror <= 1e-6: return x_i_flat, y_i_flat
 
+    # Case 1: Mirror radius is negligible
+    if R_mirror <= 1e-9: # Increased tolerance slightly for safety
+        return x_i_flat, y_i_flat
+
+    # Case 2: Object at the Center of Curvature (C)
+    # For these points, the image is also at C.
     at_C_mask = np.isclose(x_o_flat, 0) & np.isclose(y_o_flat, 0)
-    x_i_flat[at_C_mask], y_i_flat[at_C_mask] = 0, 0
+    x_i_flat[at_C_mask] = 0
+    y_i_flat[at_C_mask] = 0
     
+    # Case 3: Object on the optical axis (x-axis), but not at C
+    # Use the exact formula for on-axis points relative to C: xi = -xo*R / (R + 2*xo)
     on_axis_mask = ~at_C_mask & np.isclose(y_o_flat, 0)
     if np.any(on_axis_mask):
         x_o_ax = x_o_flat[on_axis_mask]
+        # Denominator for the on-axis formula
         den_ax = R_mirror + 2 * x_o_ax 
         x_i_ax = np.full_like(x_o_ax, np.nan)
-        safe_ax = ~np.isclose(den_ax, 0)
-        x_i_ax[safe_ax] = -x_o_ax[safe_ax] * R_mirror / den_ax[safe_ax] 
-        x_i_flat[on_axis_mask], y_i_flat[on_axis_mask] = x_i_ax, 0
-    
+        # Avoid division by zero if object is at -R/2 from C (image at infinity)
+        safe_ax_den_mask = ~np.isclose(den_ax, 0)
+        x_i_ax[safe_ax_den_mask] = -x_o_ax[safe_ax_den_mask] * R_mirror / den_ax[safe_ax_den_mask]
+        
+        x_i_flat[on_axis_mask] = x_i_ax
+        y_i_flat[on_axis_mask] = 0 # Image is also on the axis
+
+    # Case 4: General off-axis object points (not at C, not on x-axis)
     general_mask = ~at_C_mask & ~on_axis_mask
     if np.any(general_mask):
-        x_o_gen, y_o_gen = x_o_flat[general_mask], y_o_flat[general_mask]
-        x_i_calc, y_i_calc = np.full_like(x_o_gen, np.nan), np.full_like(y_o_gen, np.nan)
+        # Extract relevant object points
+        a = x_o_flat[general_mask] # user's 'a'
+        b = y_o_flat[general_mask] # user's 'b'
         
-        valid_y_mask = (y_o_gen**2 <= R_mirror**2 + 1e-9)
-        if np.any(valid_y_mask):
-            x_o_v, y_o_v = x_o_gen[valid_y_mask], y_o_gen[valid_y_mask]
-            y_m = y_o_v
-            sqrt_arg = R_mirror**2 - y_m**2
-            safe_sqrt_mask = sqrt_arg >= -1e-9
-            
-            if np.any(safe_sqrt_mask):
-                x_o_s, y_o_s, y_m_s = x_o_v[safe_sqrt_mask], y_o_v[safe_sqrt_mask], y_m[safe_sqrt_mask]
-                x_m_s = -np.sqrt(np.maximum(0, sqrt_arg[safe_sqrt_mask]))
+        # Initialize image coordinates for this general case
+        x_i_gen = np.full_like(a, np.nan)
+        y_i_gen = np.full_like(b, np.nan)
 
-                L_inc_x, N_unit_x, N_unit_y = -1.0, x_m_s / R_mirror, y_m_s / R_mirror
-                dot_L_N = L_inc_x * N_unit_x
-                L_rfl_x, L_rfl_y = L_inc_x - 2 * dot_L_N * N_unit_x, -2 * dot_L_N * N_unit_y
+        # --- Calculations for Line 1 (Reflected Ray) ---
+        # Point of incidence P_m = (x_P, y_P) on mirror x^2+y^2=R^2 for parallel ray at height b
+        # x_P = -sqrt(R^2 - b^2)
+        sqrt_arg_R_b_sq = R_mirror**2 - b**2
+        
+        # Mask for valid incidence points (ray must hit the mirror, i.e., |b| <= R)
+        # And sqrt_arg must be non-negative
+        valid_incidence_mask = (sqrt_arg_R_b_sq >= -1e-9) # Allow small negative due to precision
+        
+        if np.any(valid_incidence_mask):
+            a_v = a[valid_incidence_mask]
+            b_v = b[valid_incidence_mask]
+            sqrt_arg_v = np.maximum(0, sqrt_arg_R_b_sq[valid_incidence_mask]) # Ensure non-negative
+            
+            # x_P for valid points
+            x_P_v = -np.sqrt(sqrt_arg_v) # This is -\sqrt{R^2-b^2}
+            
+            # Calculate m_param (user's 'm')
+            # m_param = (2*b*sqrt(R^2-b^2)) / (R^2 - 2*b^2)
+            numerator_m = 2 * b_v * x_P_v # Note: x_P_v is negative, so this is -2*b*sqrt(...)
+            numerator_m = -numerator_m # To match (2*b*sqrt(R^2-b^2))
+            
+            denominator_m = R_mirror**2 - 2 * b_v**2
+            
+            m_param = np.full_like(a_v, np.nan)
+            
+            # Handle cases for m_param calculation
+            # Case 4a: Reflected ray is vertical (denominator_m is zero)
+            vertical_refl_mask = np.isclose(denominator_m, 0)
+            if np.any(vertical_refl_mask):
+                # Line 1 is x = x_P_v
+                x_i_vert_refl = x_P_v[vertical_refl_mask]
+                # Line 2 is y = (b_v/a_v)*x.
+                # If a_v[vertical_refl_mask] is also zero, object is on y-axis.
+                # Line 2 becomes x=0. If x_P_v is not 0, parallel vertical lines -> NaN (already init)
+                # If x_P_v is 0, then b_v must be R, den_m = -R^2 !=0 (contradiction, so x_P_v !=0 if den_m=0)
                 
-                numerator_t = x_o_s * y_m_s - y_o_s * x_m_s
-                denominator_t = L_rfl_x * y_o_s - L_rfl_y * x_o_s
+                # Avoid division by zero for a_v
+                a_v_vert_refl = a_v[vertical_refl_mask]
+                b_v_vert_refl = b_v[vertical_refl_mask]
                 
-                t_intersect = np.full_like(x_o_s, np.nan)
-                safe_intersect_mask = ~np.isclose(denominator_t, 0)
-                t_intersect[safe_intersect_mask] = numerator_t[safe_intersect_mask] / denominator_t[safe_intersect_mask]
+                y_i_vert_refl_temp = np.full_like(a_v_vert_refl, np.nan)
                 
-                x_i_temp, y_i_temp = x_m_s + t_intersect * L_rfl_x, y_m_s + t_intersect * L_rfl_y
+                # If object is on y-axis (a_v_vert_refl is zero)
+                obj_on_y_axis_vert_mask = np.isclose(a_v_vert_refl, 0)
+                # If Line 1 (x=x_P) and Line 2 (x=0) are different and vertical, image at infinity (NaN)
+                # This is implicitly handled as x_i_vert_refl is x_P, and if a_v is 0, y_i remains NaN unless x_P is also 0.
+                # But x_P cannot be 0 if denominator_m is 0 (unless R=0, handled).
+                # So if a_v is 0 and den_m is 0, lines are x=x_P and x=0 (parallel, distinct). Image is NaN.
                 
-                x_i_valid_y, y_i_valid_y = np.full_like(x_o_v, np.nan), np.full_like(y_o_v, np.nan)
-                x_i_valid_y[safe_sqrt_mask], y_i_valid_y[safe_sqrt_mask] = x_i_temp, y_i_temp
-                x_i_calc[valid_y_mask], y_i_calc[valid_y_mask] = x_i_valid_y, y_i_valid_y
-        x_i_flat[general_mask], y_i_flat[general_mask] = x_i_calc, y_i_calc
+                # If object is not on y-axis (a_v_vert_refl is not zero)
+                obj_not_on_y_axis_vert_mask = ~obj_on_y_axis_vert_mask
+                if np.any(obj_not_on_y_axis_vert_mask):
+                    y_i_vert_refl_temp[obj_not_on_y_axis_vert_mask] = \
+                        (b_v_vert_refl[obj_not_on_y_axis_vert_mask] / a_v_vert_refl[obj_not_on_y_axis_vert_mask]) * \
+                        x_i_vert_refl[obj_not_on_y_axis_vert_mask]
+
+                # Temporary arrays to store results for this sub-mask
+                x_i_gen_v_temp = np.full_like(a_v, np.nan)
+                y_i_gen_v_temp = np.full_like(b_v, np.nan)
+                
+                x_i_gen_v_temp[vertical_refl_mask] = x_i_vert_refl
+                y_i_gen_v_temp[vertical_refl_mask] = y_i_vert_refl_temp
+
+
+            # Case 4b: Reflected ray is not vertical
+            non_vertical_refl_mask = ~vertical_refl_mask
+            if np.any(non_vertical_refl_mask):
+                m_param_nv = numerator_m[non_vertical_refl_mask] / denominator_m[non_vertical_refl_mask]
+                
+                a_v_nv = a_v[non_vertical_refl_mask]
+                b_v_nv = b_v[non_vertical_refl_mask]
+                x_P_v_nv = x_P_v[non_vertical_refl_mask]
+                sqrt_term_nv = np.sqrt(np.maximum(0, R_mirror**2 - b_v_nv**2)) # Safe sqrt
+
+                # Denominator for x_i: m_param + b/a
+                # Handle a_v_nv == 0 (object on y-axis) separately for m_param + b/a
+                den_xi = np.full_like(a_v_nv, np.nan)
+                
+                # Subcase: Object on y-axis (a_v_nv is zero)
+                obj_on_y_mask_nv = np.isclose(a_v_nv, 0)
+                if np.any(obj_on_y_mask_nv):
+                    # Line 2 is x=0, so x_i = 0
+                    # y_i from Line 1: y_i = b - m_param * sqrt(R^2-b^2) (using user's formula for line1 and x=0)
+                    # User's line1: y - b = -m(x - x_P) => y = b - m(x - x_P)
+                    # if x=0, y = b - m(-x_P) = b + m*x_P
+                    # m is m_param_nv[obj_on_y_mask_nv]
+                    # x_P is x_P_v_nv[obj_on_y_mask_nv]
+                    if 'x_i_gen_v_temp' not in locals(): # Initialize if not created by vertical case
+                        x_i_gen_v_temp = np.full_like(a_v, np.nan)
+                        y_i_gen_v_temp = np.full_like(b_v, np.nan)
+
+                    x_i_gen_v_temp[non_vertical_refl_mask][obj_on_y_mask_nv] = 0
+                    y_i_gen_v_temp[non_vertical_refl_mask][obj_on_y_mask_nv] = \
+                        b_v_nv[obj_on_y_mask_nv] + \
+                        m_param_nv[obj_on_y_mask_nv] * x_P_v_nv[obj_on_y_mask_nv]
+
+                # Subcase: Object not on y-axis (a_v_nv is not zero)
+                obj_not_on_y_mask_nv = ~obj_on_y_mask_nv
+                if np.any(obj_not_on_y_mask_nv):
+                    den_xi_val = m_param_nv[obj_not_on_y_mask_nv] + \
+                                 b_v_nv[obj_not_on_y_mask_nv] / a_v_nv[obj_not_on_y_mask_nv]
+                    
+                    # Avoid division by zero if Line 1 and Line 2 are parallel
+                    safe_den_xi_mask = ~np.isclose(den_xi_val, 0)
+                    
+                    x_i_calc = np.full_like(den_xi_val, np.nan)
+                    y_i_calc = np.full_like(den_xi_val, np.nan)
+
+                    if np.any(safe_den_xi_mask):
+                        # Numerator for x_i: b - m_param * sqrt(R^2-b^2)
+                        num_xi_val = b_v_nv[obj_not_on_y_mask_nv][safe_den_xi_mask] - \
+                                     m_param_nv[obj_not_on_y_mask_nv][safe_den_xi_mask] * \
+                                     sqrt_term_nv[obj_not_on_y_mask_nv][safe_den_xi_mask]
+                        
+                        x_i_calc[safe_den_xi_mask] = num_xi_val / den_xi_val[safe_den_xi_mask]
+                        y_i_calc[safe_den_xi_mask] = (b_v_nv[obj_not_on_y_mask_nv][safe_den_xi_mask] / \
+                                                      a_v_nv[obj_not_on_y_mask_nv][safe_den_xi_mask]) * \
+                                                      x_i_calc[safe_den_xi_mask]
+                    
+                    # Place calculated values into the temporary arrays
+                    if 'x_i_gen_v_temp' not in locals():
+                        x_i_gen_v_temp = np.full_like(a_v, np.nan)
+                        y_i_gen_v_temp = np.full_like(b_v, np.nan)
+                    
+                    # Get a boolean mask relative to a_v for obj_not_on_y_mask_nv
+                    # This is a bit complex due to nested masking.
+                    # We need to map results from obj_not_on_y_mask_nv back to non_vertical_refl_mask indices
+                    
+                    # Create an index array for non_vertical_refl_mask
+                    idx_non_vertical = np.where(non_vertical_refl_mask)[0]
+                    
+                    # Create an index array for obj_not_on_y_mask_nv within non_vertical_refl_mask
+                    idx_obj_not_on_y_within_nv = np.where(obj_not_on_y_mask_nv)[0]
+
+                    # Combine indices to update x_i_gen_v_temp and y_i_gen_v_temp
+                    final_indices_for_update = idx_non_vertical[idx_obj_not_on_y_within_nv]
+
+                    x_i_gen_v_temp[final_indices_for_update] = x_i_calc
+                    y_i_gen_v_temp[final_indices_for_update] = y_i_calc
+
+
+            # Consolidate results from vertical and non-vertical reflection if both occurred
+            if 'x_i_gen_v_temp' in locals() and 'y_i_gen_v_temp' in locals() :
+                 # Place results from valid_incidence_mask back into x_i_gen, y_i_gen
+                x_i_gen[valid_incidence_mask] = x_i_gen_v_temp
+                y_i_gen[valid_incidence_mask] = y_i_gen_v_temp
+        
+        # Place results from general_mask back into the final flat arrays
+        x_i_flat[general_mask] = x_i_gen
+        y_i_flat[general_mask] = y_i_gen
+        
     return x_i_flat, y_i_flat
 
 def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, plot_zoom, request_id):
