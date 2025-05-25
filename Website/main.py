@@ -1678,6 +1678,7 @@ def generate_task12bii_plot():
     ax.set_xlabel("Angle of Incidence on First Face (degrees)")
     ax.set_ylabel("Angle of Deflection (degrees)")
 
+    user_theta_max_deg_val = 5.787
     ax.axvline(x=user_theta_max_deg_val, color='r', linestyle=':', alpha=0.7, label=f"θ_max = {user_theta_max_deg_val}°")
 
     # Updated title
