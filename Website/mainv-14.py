@@ -5,7 +5,7 @@ import uuid
 import logging
 from math import isqrt, cos, sin, radians, pi, log10, acos, atan2, degrees, sqrt # Added sqrt
 from time import perf_counter
-from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify, session
+from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify
 from werkzeug.utils import secure_filename
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,19 +16,75 @@ from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from skimage.transform import resize
 import matplotlib.image as mpimg
+def load_and_process_image(filepath):
+    global image_rgba, current_img_height , current_img_width, img_aspect_ratio
+    try:
+        img_data_raw = mpimg.imread(filepath)
+    except FileNotFoundError:
+        logging.error(f"Image file {filepath} not found!")
+        # Fallback to a black placeholder if default also fails
+        img_data_raw = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 4), dtype=np.float32) # RGBA
+        img_data_raw[:,:,3] = 1.0 # Full alpha
+
+    # Normalize image data to [0, 1] if it's in [0, 255] (uint8)
+    if img_data_raw.dtype == np.uint8:
+        img_data_raw = img_data_raw / 255.0
+    
+    # Ensure image is resized if too large (from upload, not default)
+    h_orig, w_orig = img_data_raw.shape[0], img_data_raw.shape[1]
+    if filepath != DEFAULT_IMAGE_PATH and (h_orig > MAX_DIMENSION or w_orig > MAX_DIMENSION): # Only resize uploads if too big
+        factor = max(h_orig, w_orig) / MAX_DIMENSION
+    
+    if h_orig > target_dimension or w_orig > target_dimension: # Resize if larger than target
+    if h_orig > w_orig:
+        new_h = target_dimension
+        new_w = int(w_orig * (target_dimension / h_orig))
+    else:
+        new_w = target_dimension
+        new_h = int(h_orig * (target_dimension / w_orig))
+    img_data_raw = resize(img_data_raw, (new_h, new_w), anti_aliasing=True, mode='reflect')
+    img_data_raw = np.clip(img_data_raw, 0, 1)
 
 
+    # Process image into RGBA float [0,1]
+    if img_data_raw.ndim == 2: # Grayscale image
+        img_rgb = np.stack((img_data_raw,)*3, axis=-1) 
+        img_alpha = np.ones(img_data_raw.shape, dtype=np.float32)
+    elif img_data_raw.shape[2] == 3: # RGB image
+        img_rgb = img_data_raw
+        img_alpha = np.ones((img_data_raw.shape[0], img_data_raw.shape[1]), dtype=np.float32)
+    elif img_data_raw.shape[2] == 4: # RGBA image
+        img_rgb = img_data_raw[:,:,:3]
+        img_alpha = img_data_raw[:,:,3]
+    else: # Fallback for unexpected shapes
+        logging.warning(f"Unexpected image shape: {img_data_raw.shape}. Using placeholder.")
+        img_rgb = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 3), dtype=np.float32)
+        img_alpha = np.ones((MAX_DIMENSION, MAX_DIMENSION), dtype=np.float32)
+
+    image_rgba = np.concatenate((img_rgb, img_alpha[:,:,np.newaxis]), axis=2)
+    current_img_height , current_img_width = image_rgba.shape[:2]
+    img_aspect_ratio = current_img_width / current_img_height  if current_img_height  > 0 else 1.0
+    processed_rgba_data = np.concatenate((img_rgb, img_alpha[:,:,np.newaxis]), axis=2)
+    current_img_height , current_current_img_width = processed_rgba_data.shape[:2]
+    current_img_aspect_ratio = current_current_img_width / current_img_height  if current_img_height  > 0 else 1.0
+    logging.info(f"Image loaded and processed: {filepath}, Target Dim: {target_dimension}, Actual Size: {current_current_img_width}x{current_img_height }")
+    return processed_rgba_data, current_img_height , current_current_img_width, current_img_aspect_ratio
 
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
+
+# Add Flask secret key for sessions
 app.secret_key = os.urandom(24) # Or a fixed secret key
+
+# Load default image data at startup
+DEFAULT_PROCESSED_IMG_RGBA, DEFAULT_PROCESSED_IMG_H, DEFAULT_PROCESSED_IMG_W, DEFAULT_PROCESSED_IMG_ASPECT_RATIO = load_and_process_image(DEFAULT_IMAGE_PATH, MAX_DIMENSION)
 
 # Configure upload folder and maximum dimensions for user uploaded images
 UPLOAD_FOLDER = './uploads'
 STATIC_FOLDER = './static'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True) # Ensure static folder exists
-MAX_DIMENSION = 192  # maximum width or height (in pixels)
+MAX_DIMENSION = 120  # maximum width or height (in pixels)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # --- Ensure dummy logo and optics images exist in ./static for testing if not provided by user ---
@@ -88,56 +144,11 @@ if not os.path.exists(DEFAULT_IMAGE_PATH):
         logging.error(f"Could not create dummy default image: {e}")
 
 
-global_image_rgba = None # Will store image as RGBA float [0,1]
-img_height, img_width = MAX_DIMENSION, MAX_DIMENSION # Default placeholder
-img_aspect_ratio = 1.0
-
-def load_and_process_image(filepath):
-    global global_image_rgba, img_height, img_width, img_aspect_ratio
-    try:
-        img_data_raw = mpimg.imread(filepath)
-    except FileNotFoundError:
-        logging.error(f"Image file {filepath} not found!")
-        # Fallback to a black placeholder if default also fails
-        img_data_raw = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 4), dtype=np.float32) # RGBA
-        img_data_raw[:,:,3] = 1.0 # Full alpha
-
-    # Normalize image data to [0, 1] if it's in [0, 255] (uint8)
-    if img_data_raw.dtype == np.uint8:
-        img_data_raw = img_data_raw / 255.0
-    
-    # Ensure image is resized if too large (from upload, not default)
-    h_orig, w_orig = img_data_raw.shape[0], img_data_raw.shape[1]
-    if filepath != DEFAULT_IMAGE_PATH and (h_orig > MAX_DIMENSION or w_orig > MAX_DIMENSION): # Only resize uploads if too big
-        factor = max(h_orig, w_orig) / MAX_DIMENSION
-        new_h, new_w = int(h_orig / factor), int(w_orig / factor)
-        img_data_raw = resize(img_data_raw, (new_h, new_w), anti_aliasing=True, mode='reflect')
-        img_data_raw = np.clip(img_data_raw, 0, 1)
 
 
-    # Process image into RGBA float [0,1]
-    if img_data_raw.ndim == 2: # Grayscale image
-        img_rgb = np.stack((img_data_raw,)*3, axis=-1) 
-        img_alpha = np.ones(img_data_raw.shape, dtype=np.float32)
-    elif img_data_raw.shape[2] == 3: # RGB image
-        img_rgb = img_data_raw
-        img_alpha = np.ones((img_data_raw.shape[0], img_data_raw.shape[1]), dtype=np.float32)
-    elif img_data_raw.shape[2] == 4: # RGBA image
-        img_rgb = img_data_raw[:,:,:3]
-        img_alpha = img_data_raw[:,:,3]
-    else: # Fallback for unexpected shapes
-        logging.warning(f"Unexpected image shape: {img_data_raw.shape}. Using placeholder.")
-        img_rgb = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 3), dtype=np.float32)
-        img_alpha = np.ones((MAX_DIMENSION, MAX_DIMENSION), dtype=np.float32)
 
-    global_image_rgba = np.concatenate((img_rgb, img_alpha[:,:,np.newaxis]), axis=2)
-    img_height, img_width = global_image_rgba.shape[:2]
-    img_aspect_ratio = img_width / img_height if img_height > 0 else 1.0
-    logging.info(f"Image loaded: {filepath}, Size: {img_width}x{img_height}")
 
-load_and_process_image(DEFAULT_IMAGE_PATH) # Load default image at startup
 
-H, W = img_height, img_width # For old code compatibility if needed, prefer img_height, img_width
 
 ########################################
 # GENERIC BLANK IMAGE (for aborted computations)
@@ -645,7 +656,7 @@ interactive_template = '''
     }
 
     {% if banned_validation %} // For Task 6 (original banned validation)
-      var IMG_WIDTH_JS = {{ img_width if img_width else 100 }}; 
+      var current_img_width_JS = {{ current_img_width if current_img_width else 100 }}; 
       var oldValues = {};
       {% for slider in sliders %}
          oldValues["{{ slider.id }}"] = parseFloat(document.getElementById("{{ slider.id }}").value);
@@ -662,16 +673,16 @@ interactive_template = '''
             var f_val = parseFloat(fValElement.value); 
 
             if (sliderId === "start_x") { 
-              if (start_x <= f_val && f_val <= start_x + IMG_WIDTH_JS) { 
-                if (newValue <= f_val && f_val <= newValue + IMG_WIDTH_JS) { 
-                    if (newValue > oldValues["start_x"]) { fValElement.value = newValue + IMG_WIDTH_JS + 1; } 
+              if (start_x <= f_val && f_val <= start_x + current_img_width_JS) { 
+                if (newValue <= f_val && f_val <= newValue + current_img_width_JS) { 
+                    if (newValue > oldValues["start_x"]) { fValElement.value = newValue + current_img_width_JS + 1; } 
                     else { fValElement.value = newValue - 1; } 
                     document.getElementById("f_val_value").innerText = formatDisplayValue("f_val", fValElement.value);
                 }
               }
             } else if (sliderId === "f_val") { 
-              if (start_x <= newValue && newValue <= start_x + IMG_WIDTH_JS) { 
-                if (newValue > oldValues["f_val"]) { fValElement.value = start_x + IMG_WIDTH_JS + 1; }
+              if (start_x <= newValue && newValue <= start_x + current_img_width_JS) { 
+                if (newValue > oldValues["f_val"]) { fValElement.value = start_x + current_img_width_JS + 1; }
                 else { fValElement.value = start_x - 1; }
                 document.getElementById("f_val_value").innerText = formatDisplayValue("f_val", fValElement.value);
               }
@@ -932,13 +943,13 @@ def render_interactive_page(slider_config, title, plot_endpoint, task_id_for_tem
         initial_query_list.append(f"{key}={value}")
     initial_query = "&".join(initial_query_list)
     
-    current_img_width = img_width if 'img_width' in globals() and img_width is not None else 100
+    current_current_img_width = current_img_width if 'current_img_width' in globals() and current_img_width is not None else 100
 
     context = {
         "sliders": slider_config, "title": title, "plot_endpoint": plot_endpoint,
         "initial_query": initial_query, 
         "banned_validation": banned_validation and task_id_for_template == "6", # Make specific to task 6
-        "playable": playable, "img_width": current_img_width,
+        "playable": playable, "current_img_width": current_current_img_width,
         "tasks_overview": task_overview, "task_id_for_template": task_id_for_template
     }
     context.update(extra_context)
@@ -972,8 +983,8 @@ interactive_tasks = {
     "5": {
         "title": "Task 5: Virtual Image Plot",
         "sliders": [
-            {"id": "offset_x", "label": "Object X Dist from Mirror", "min": 0, "max": int(3 * (img_width if img_width else W)), "value": int((img_width if img_width else W)/10.0 +1), "step": max(1,int(W/20)), "unit":"px"},
-            {"id": "offset_y", "label": "Object Y Offset from Center (slider increase moves object UP)", "min": int(-(img_height if img_height else H)), "max": int(img_height if img_height else H), "value": 0, "step": max(1,int(H/20)), "unit":"px"},
+            {"id": "offset_x", "label": "Object X Dist from Mirror", "min": 0, "max": int(3 * (current_img_width if current_img_width else W)), "value": int((current_img_width if current_img_width else W)/10.0 +1), "step": max(1,int(W/20)), "unit":"px"},
+            {"id": "offset_y", "label": "Object Y Offset from Center (slider increase moves object UP)", "min": int(-(current_img_height  if current_img_height  else H)), "max": int(current_img_height  if current_img_height  else H), "value": 0, "step": max(1,int(H/20)), "unit":"px"},
             {"id": "canvas_size", "label": "Canvas Size", "min": int(max(W, H) * 1.5), "max": int(max(W, H) * 5), "value": int(max(W,H)*3), "step": 10, "unit":"px"}
         ],
         "plot_endpoint": "/plot/5",
@@ -981,14 +992,14 @@ interactive_tasks = {
     "6": { 
         "title": "Task 6+7: Converging Lens Model",
         "sliders": [
-            {"id": "start_x", "label": "Object Start X (from lens)", "min": 0, "max": int(3 * (img_width if img_width else W)), "value": int(1.5*(img_width if img_width else W)), "step": max(1,int(W/20)), "unit":"px"},
-            {"id": "start_y", "label": "Object Start Y (from axis, slider increase moves object UP, image DOWN if inverted)", "min": -int(1.5 * (img_height if img_height else H)), "max": int(1.5 * (img_height if img_height else H)), "value": 0, "step": max(1,int(H/20)), "unit":"px"},
+            {"id": "start_x", "label": "Object Start X (from lens)", "min": 0, "max": int(3 * (current_img_width if current_img_width else W)), "value": int(1.5*(current_img_width if current_img_width else W)), "step": max(1,int(W/20)), "unit":"px"},
+            {"id": "start_y", "label": "Object Start Y (from axis, slider increase moves object UP, image DOWN if inverted)", "min": -int(1.5 * (current_img_height  if current_img_height  else H)), "max": int(1.5 * (current_img_height  if current_img_height  else H)), "value": 0, "step": max(1,int(H/20)), "unit":"px"},
             {"id": "scale", "label": "Canvas Scale Factor", "min": 1, "max": 15, "value": 7, "step": 1},
-            {"id": "f_val", "label": "Focal Length", "min": 1, "max": int(2 * (img_width if img_width else W)), "value": int(0.75*(img_width if img_width else W)), "step": max(1,int(W/20)), "unit":"px"}
+            {"id": "f_val", "label": "Focal Length", "min": 1, "max": int(2 * (current_img_width if current_img_width else W)), "value": int(0.75*(current_img_width if current_img_width else W)), "step": max(1,int(W/20)), "unit":"px"}
         ],
         "plot_endpoint": "/plot/6",
         "banned_validation": True, 
-        "extra_context": {"img_width": img_width if img_width else W} 
+        "extra_context": {"current_img_width": current_img_width if current_img_width else W} 
     },
     "8": {
         "title": "Task 8: Concave Mirror (Spherical Aberration)",
@@ -1072,7 +1083,7 @@ task_overview = {
     "11a": {"title": "Task 11a: ε Curves", "desc": "Elevation angles using computed ε curves.", "subtasks": {}, "button_text": "11a: ε Curves"},
     "11b": {"title": "Task 11b: Color Mapping", "desc": "Rainbow curve color mapping.", "subtasks": {}, "button_text": "11b: Color Mapping"},
     "11c": {"title": "Task 11c: Refraction Scatter", "desc": "Scatter plot for refraction angles.", "subtasks": {}, "button_text": "11c: Refraction Scatter"},
-    "11d": {"title": "Task 11d: Interactive Rainbows", "desc": "Interactive refraction circles for rainbow.", "subtasks": {}, "button_text": "11d: Interactive Circles"},
+    "11d": {"title": "Task 11d: Interactive Circles", "desc": "Interactive refraction circles for rainbow.", "subtasks": {}, "button_text": "11d: Interactive Circles"},
     "12": {
         "title": "Task 12: Prism Analysis", "desc": "Prism light dispersion and angle analysis.",
         "subtasks": { "12a": "Interactive Prism Model", "12b": "Prism Angle Plots" },
@@ -1825,16 +1836,15 @@ def generate_task4_plot(v_log, n1_val, n2_val, y_val, l_val, request_id):
         logging.error(f"Task 4 plot error: {e}", exc_info=True)
         return generate_blank_image()
 
-def generate_task5_plot(offset_x_slider, offset_y_from_slider, canvas_size_val, request_id):
-    global global_image_rgba, img_height, img_width
+def generate_task5_plot(offset_x_slider, offset_y_from_slider, canvas_size_val, image_rgba, current_img_height, current_img_width, request_id   ):
     try:
         check_interrupt("5", request_id)
-        if global_image_rgba is None or img_height == 0 or img_width == 0: 
+        if image_rgba is None or current_img_height  == 0 or current_img_width == 0: 
             logging.warning("Task 5: Global image not available.")
             return generate_blank_image()
 
         S = int(canvas_size_val)
-        H_img, W_img = img_height, img_width
+        H_img, W_img = current_img_height , current_img_width
         
         # Apply slider reversal for Y offset
         effective_offset_y = -offset_y_from_slider
@@ -1857,7 +1867,7 @@ def generate_task5_plot(offset_x_slider, offset_y_from_slider, canvas_size_val, 
             # To fix object inversion: read from bottom of source image for top of display
             r_img_src = H_img - 1 - r_img_disp 
             for c_img in range(W_img): 
-                color_rgba = global_image_rgba[r_img_src, c_img]
+                color_rgba = image_rgba[r_img_src, c_img]
                 
                 # Object pixel target on canvas array
                 canvas_c_obj = int(obj_plot_left_x + c_img)
@@ -1906,14 +1916,13 @@ def generate_task5_plot(offset_x_slider, offset_y_from_slider, canvas_size_val, 
         logging.error(f"Task 5 plot error: {e}", exc_info=True)
         return generate_blank_image()
 
-def generate_task6_plot(start_x_obj_dist, start_y_obj_from_slider, scale_val, f_val_lens, request_id):
-    global global_image_rgba, img_height, img_width
+def generate_task6_plot(start_x_obj_dist, start_y_obj_from_slider, scale_val, f_val_lens, image_rgba, current_img_height, current_img_width, request_id):
     try:
         check_interrupt("6", request_id)
-        if global_image_rgba is None or img_height == 0 or img_width == 0:
+        if image_rgba is None or current_img_height  == 0 or current_img_width == 0:
             return generate_blank_image()
 
-        H_img, W_img = img_height, img_width
+        H_img, W_img = current_img_height , current_img_width
         num_channels_on_canvas = 4 
 
         # Apply slider reversal for Y offset
@@ -1936,7 +1945,7 @@ def generate_task6_plot(start_x_obj_dist, start_y_obj_from_slider, scale_val, f_
             r_img_src = H_img - 1 - r_img_disp # To fix object inversion: read from bottom of source for top of display
             
             for c_img in range(W_img): 
-                color = global_image_rgba[r_img_src, c_img]
+                color = image_rgba[r_img_src, c_img]
 
                 # Object pixel's x-coordinate relative to lens (u for this column of pixels)
                 # start_x_obj_dist is distance of object's left edge from lens.
@@ -2259,12 +2268,12 @@ def transform_points_spherical_aberration_t8_thales(x_o_flat, y_o_flat, R_mirror
         
     return x_i_flat, y_i_flat
 
-def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, plot_zoom, request_id):
-    global global_image_rgba, img_height, img_width, img_aspect_ratio
+def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, plot_zoom, request_id, image_rgba, current_img_height, current_img_width, request_id):
     try:
+        img_aspect_ratio = current_img_width / current_img_height
         check_interrupt("8", request_id)
-        if global_image_rgba is None: return generate_blank_image()
-        H_obj_img, W_obj_img = img_height, img_width
+        if image_rgba is None: return generate_blank_image()
+        H_obj_img, W_obj_img = current_img_height , current_img_width
         obj_world_width = img_aspect_ratio * obj_world_height
         
         x_obj_corners = np.linspace(obj_left_x, obj_left_x + obj_world_width, W_obj_img + 1)
@@ -2275,8 +2284,8 @@ def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, p
 
         fig = Figure(figsize=(9, 7)); ax = fig.add_subplot(111)
         obj_extent = [obj_left_x, obj_left_x + obj_world_width, obj_center_y - obj_world_height/2, obj_center_y + obj_world_height/2]
-        # Assuming global_image_rgba[0,0] is top-left. For imshow 'upper' means [0,0] is top-left.
-        ax.imshow(global_image_rgba, extent=obj_extent, origin='upper', aspect='auto', zorder=1)
+        # Assuming image_rgba[0,0] is top-left. For imshow 'upper' means [0,0] is top-left.
+        ax.imshow(image_rgba, extent=obj_extent, origin='upper', aspect='auto', zorder=1)
 
         mirror_y = np.linspace(-R_val, R_val, 200); mirror_x = -np.sqrt(np.maximum(0, R_val**2 - mirror_y**2))
         ax.plot(mirror_x, mirror_y, 'b-', lw=2, label=f"Mirror (R={R_val:.2f})", zorder=0)
@@ -2287,14 +2296,14 @@ def generate_task8_plot_new(R_val, obj_left_x, obj_center_y, obj_world_height, p
         patches, facecolors = [], []
         FILTER_T8, R_sq_tol = 1e-6, R_val**2 + 1e-6
         for r_disp in range(H_obj_img): # r_disp is row in displayed object (0=top)
-            # r_src = H_obj_img - 1 - r_disp # If global_image_rgba needs flipping for color source
-            r_src = r_disp # Assuming global_image_rgba is already oriented as desired for coloring patches
+            # r_src = H_obj_img - 1 - r_disp # If image_rgba needs flipping for color source
+            r_src = r_disp # Assuming image_rgba is already oriented as desired for coloring patches
             for c in range(W_obj_img):
                 verts = [(x_i_mesh[r_disp,c],y_i_mesh[r_disp,c]), (x_i_mesh[r_disp,c+1],y_i_mesh[r_disp,c+1]), 
                          (x_i_mesh[r_disp+1,c+1],y_i_mesh[r_disp+1,c+1]), (x_i_mesh[r_disp+1,c],y_i_mesh[r_disp+1,c])]
                 if any(np.isnan(v[0]) or np.isnan(v[1]) for v in verts): continue
                 if not all(vx <= FILTER_T8 for vx,vy in verts): continue 
-                patches.append(Polygon(verts, closed=True)); facecolors.append(global_image_rgba[r_src,c]) # Use r_src for color
+                patches.append(Polygon(verts, closed=True)); facecolors.append(image_rgba[r_src,c]) # Use r_src for color
         if patches:
             coll = PatchCollection(patches, fc=facecolors, ec='none', zorder=1.5, aa=True); ax.add_collection(coll)
 
@@ -2395,90 +2404,12 @@ def transform_points_convex_obj_right_t9(x_o_flat, y_o_flat, R_mirror):
         x_i_flat[off_axis], y_i_flat[off_axis] = x_i, y_i
         
     return x_i_flat, y_i_flat
-import numpy as np
 
-def transform_points_convex_obj_right_t9_thales(x_o_flat, y_o_flat, R_mirror):
-    """
-    Transforms object points (x_o_flat, y_o_flat) using the equations derived
-    from the provided geometric construction (referred to as "Thales" derivation).
-
-    The derivation involves a circle of radius R_mirror centered at the origin.
-    The transformation is:
-    x_i = (x_o * R_mirror^2) / (2*x_o*sqrt(R_mirror^2 - y_o^2) - R_mirror^2 + 2*y_o^2)
-    y_i = (y_o * R_mirror^2) / (2*x_o*sqrt(R_mirror^2 - y_o^2) - R_mirror^2 + 2*y_o^2)
-    This is valid for |y_o| <= R_mirror.
-
-    Args:
-        x_o_flat (np.ndarray): Flattened array of object x-coordinates.
-        y_o_flat (np.ndarray): Flattened array of object y-coordinates.
-        R_mirror (float): The radius of the circle used in the transformation.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: Flattened arrays of image x and y coordinates.
-    """
-    x_i_flat = np.full_like(x_o_flat, np.nan)
-    y_i_flat = np.full_like(y_o_flat, np.nan)
-
-    if R_mirror <= 0:
-        # Radius must be positive for the geometry to be well-defined.
-        return x_i_flat, y_i_flat
-
-    # Ensure inputs are numpy arrays for vectorized operations
-    x_o = np.asarray(x_o_flat)
-    y_o = np.asarray(y_o_flat)
-
-    # The derivation for x_A = sqrt(R_mirror^2 - y_o^2) requires |y_o| <= R_mirror.
-    # Create a mask for points where the transformation is defined.
-    # Using np.isclose for the boundary |y_o| == R_mirror is implicitly handled
-    # by sqrt unless y_o is slightly larger than R_mirror due to float precision.
-    # We will process points where R_mirror^2 - y_o^2 >= 0.
-    valid_y_mask = (y_o**2 <= R_mirror**2) # Equivalent to |y_o| <= R_mirror
-
-    # Select only the points that satisfy the condition for processing
-    # All other points will remain NaN
-    if np.any(valid_y_mask):
-        a = x_o[valid_y_mask]
-        b = y_o[valid_y_mask]
-
-        R_sq = R_mirror**2
-
-        # Calculate x_A = sqrt(R_mirror^2 - y_o^2)
-        # np.sqrt will produce NaN for negative inputs if any slip through,
-        # but valid_y_mask should prevent R_sq - b**2 < 0.
-        # Add np.maximum to prevent issues from tiny negative numbers due to precision.
-        x_A_val_sq = R_sq - b**2
-        x_A_val = np.sqrt(np.maximum(0, x_A_val_sq)) # x_A is always non-negative
-
-        # Calculate the common denominator for x_i and y_i
-        # Denominator D = 2*a*x_A - R_sq + 2*b^2
-        denominator_val = 2 * a * x_A_val - R_sq + 2 * b**2
-
-        # Calculate transformed coordinates using np.divide for safe division by zero (results in inf)
-        # Numerator for x_i is a * R_sq
-        # Numerator for y_i is b * R_sq
-        with np.errstate(divide='ignore', invalid='ignore'): # Suppress warnings for 0/0 or x/0
-            x_i_processed = np.divide(a * R_sq, denominator_val)
-            y_i_processed = np.divide(b * R_sq, denominator_val)
-        
-        # Handle cases where denominator was zero, and numerator was also zero (0/0 -> NaN)
-        # This occurs if a=0 and b=0 (object at origin).
-        # Our formula gives (0,0) -> (0,0) because den = -R_sq != 0.
-        # If R_mirror = 0, this was caught.
-        # If a point results in 0/0 for other reasons, it should be NaN.
-        # np.divide(0,0) results in NaN, which is desired.
-        # np.divide(non_zero, 0) results in inf, which is also desired (image at infinity).
-
-        x_i_flat[valid_y_mask] = x_i_processed
-        y_i_flat[valid_y_mask] = y_i_processed
-        
-    return x_i_flat, y_i_flat
-
-def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, obj_height_factor, plot_zoom, request_id):
-    global global_image_rgba, img_height, img_width, img_aspect_ratio
+def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, obj_height_factor, plot_zoom, image_rgba, current_img_height, current_img_width, request_id):
     try:
         check_interrupt("9", request_id)
-        if global_image_rgba is None: return generate_blank_image()
-        H_img, W_img = img_height, img_width
+        if image_rgba is None: return generate_blank_image()
+        H_img, W_img = current_img_height , current_img_width
         obj_h_world = R_val * obj_height_factor
         obj_w_world = img_aspect_ratio * obj_h_world
         
@@ -2497,14 +2428,14 @@ def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, 
         xo_mesh_C, yo_mesh_axis = np.meshgrid(x_obj_corners_from_C, y_obj_corners_from_axis)
         
         # Transform points (assuming transform function expects coords relative to C)
-        xi_flat_C, yi_flat_axis = transform_points_convex_obj_right_t9_thales(xo_mesh_C.flatten(), yo_mesh_axis.flatten(), R_val)
+        xi_flat_C, yi_flat_axis = transform_points_convex_obj_right_t9(xo_mesh_C.flatten(), yo_mesh_axis.flatten(), R_val)
         xi_mesh_C, yi_mesh_axis = xi_flat_C.reshape(xo_mesh_C.shape), yi_flat_axis.reshape(yo_mesh_axis.shape)
 
         fig=Figure(figsize=(9,7)); ax=fig.add_subplot(111); fig.subplots_adjust(left=0.08,right=0.82,top=0.92,bottom=0.1)
         
         obj_extent_plot = [current_obj_center_x-obj_w_world/2, current_obj_center_x+obj_w_world/2, 
                            obj_center_y_from_axis-obj_h_world/2, obj_center_y_from_axis+obj_h_world/2]
-        ax.imshow(global_image_rgba, extent=obj_extent_plot, origin='upper', aspect='auto', zorder=1.5)
+        ax.imshow(image_rgba, extent=obj_extent_plot, origin='upper', aspect='auto', zorder=1.5)
 
         # Mirror (convex, opens to the left, C at (0,0), V at (R_val,0))
         mirror_y_coords = np.linspace(-R_val*0.999, R_val*0.999, 200) # Avoid exact +/-R for sqrt
@@ -2526,7 +2457,7 @@ def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, 
                          (xi_mesh_C[r_disp+1,c_disp], yi_mesh_axis[r_disp+1,c_disp])]
                 if not any(np.isnan(p[0]) or np.isnan(p[1]) for p in verts):
                     patches.append(Polygon(verts,closed=True))
-                    fcolors_list.append(global_image_rgba[r_disp,c_disp]) # Color from original image orientation
+                    fcolors_list.append(image_rgba[r_disp,c_disp]) # Color from original image orientation
         if patches: ax.add_collection(PatchCollection(patches,fc=fcolors_list,ec='none',zorder=1,aa=True))
         
         ax.set_title("Task 9: Convex Mirror (Object Right of Pole)");ax.set_xlabel("x (from C)");ax.set_ylabel("y (from axis)")
@@ -2562,27 +2493,27 @@ def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, 
     except Exception as e: logging.error(f"Task 9 plot error: {e}", exc_info=True); return generate_blank_image()
 
 
-def generate_task10_plot(Rf, arc_angle_deg, request_id): # Renamed arc_angle to arc_angle_deg
-    global global_image_rgba, img_width, img_height
+def generate_task10_plot(Rf, arc_angle_deg, request_id, image_rgba, current_img_height, current_img_width, request_id): # Renamed arc_angle to arc_angle_deg
+
 
     try:
         check_interrupt("10", request_id)
 
-        if global_image_rgba is None or img_width == 0 or img_height == 0:
+        if image_rgba is None or current_img_width == 0 or current_img_height  == 0:
             logging.warning("Task 10: Global image data not available or dimensions are zero.")
             return generate_blank_image()
 
-        # inscribed_radius = sqrt((img_width / 2) ** 2 + (img_height / 2) ** 2) # More precise
-        inscribed_radius = float(isqrt(int((img_width / 2) ** 2 + (img_height / 2) ** 2)))
+        # inscribed_radius = sqrt((current_img_width / 2) ** 2 + (current_img_height  / 2) ** 2) # More precise
+        inscribed_radius = float(isqrt(int((current_img_width / 2) ** 2 + (current_img_height  / 2) ** 2)))
 
         x_center_proj = 0.0
         # Center of the original flat image display is (0,0).
         # Projection arcs are centered around (x_center_proj, y_center_proj)
         # y_center_proj = -inscribed_radius # Shift projection center down by one inscribed_radius
         y_center_proj = 0.0 # Let's try centering projection at (0,0) for arcs, and see.
-                            # Original code had y_center_proj = -img_height / 2, which is also an option.
+                            # Original code had y_center_proj = -current_img_height  / 2, which is also an option.
                             # Let's use the original logic for y_center_proj for now.
-        y_center_proj = -img_height / 2.0
+        y_center_proj = -current_img_height  / 2.0
 
 
         arc_angle_rad = np.deg2rad(arc_angle_deg)
@@ -2594,17 +2525,17 @@ def generate_task10_plot(Rf, arc_angle_deg, request_id): # Renamed arc_angle to 
 
         R_max_factor_for_plot_extents = Rf + 1.0 # Outermost possible radius factor
 
-        for row_idx in range(img_height): # row_idx = 0 is top row of image
+        for row_idx in range(current_img_height ): # row_idx = 0 is top row of image
             if row_idx % 10 == 0: 
                 check_interrupt("10", request_id)
 
-            num_arc_segments_points = max(10,img_width // 2) # More points for wider images
+            num_arc_segments_points = max(10,current_img_width // 2) # More points for wider images
             
             # current_R_scale: Top of image (row_idx=0) maps to largest radius (farthest)
-            # Bottom of image (row_idx=img_height-1) maps to smallest radius (closest, factor 1)
+            # Bottom of image (row_idx=current_img_height -1) maps to smallest radius (closest, factor 1)
             # This creates the perspective depth.
-            current_R_scale = Rf * ((img_height - 1.0 - row_idx) / max(1.0, img_height - 1.0)) + 1.0
-            if img_height == 1: current_R_scale = Rf + 1.0
+            current_R_scale = Rf * ((current_img_height  - 1.0 - row_idx) / max(1.0, current_img_height  - 1.0)) + 1.0
+            if current_img_height  == 1: current_R_scale = Rf + 1.0
 
 
             theta_points = np.linspace(start_angle_rad, end_angle_rad, num_arc_segments_points)
@@ -2617,14 +2548,14 @@ def generate_task10_plot(Rf, arc_angle_deg, request_id): # Renamed arc_angle to 
                 p2 = (arc_x_coords[i+1], arc_y_coords[i+1])
                 arc_segments.append((p1, p2))
 
-            # global_image_rgba[row_idx, :, :3] is the RGB for the current row (top row is row_idx=0)
-            source_row_pixels_rgb = global_image_rgba[row_idx, :, :3] 
+            # image_rgba[row_idx, :, :3] is the RGB for the current row (top row is row_idx=0)
+            source_row_pixels_rgb = image_rgba[row_idx, :, :3] 
 
-            interp_target_indices = np.linspace(0, img_width - 1, num_arc_segments_points)
+            interp_target_indices = np.linspace(0, current_img_width - 1, num_arc_segments_points)
             interpolated_colors_rgb = np.zeros((num_arc_segments_points, 3), dtype=np.float32)
 
             for ch_idx in range(3): 
-                source_indices = np.arange(img_width)
+                source_indices = np.arange(current_img_width)
                 interpolated_colors_rgb[:, ch_idx] = np.interp(
                     interp_target_indices, source_indices, source_row_pixels_rgb[:, ch_idx]
                 )
@@ -2637,10 +2568,10 @@ def generate_task10_plot(Rf, arc_angle_deg, request_id): # Renamed arc_angle to 
                 ax.add_collection(lc)
 
         # Display the original flat image for reference, centered at (0,0)
-        # Image data global_image_rgba[0,0] is top-left. 'origin=upper' makes imshow display it that way.
-        original_image_display_extent = [-img_width / 2.0, img_width / 2.0, 
-                                         -img_height / 2.0, img_height / 2.0]
-        ax.imshow(global_image_rgba, extent=original_image_display_extent, origin='upper', aspect='auto', alpha=0.5, zorder=-5)
+        # Image data image_rgba[0,0] is top-left. 'origin=upper' makes imshow display it that way.
+        original_image_display_extent = [-current_img_width / 2.0, current_img_width / 2.0, 
+                                         -current_img_height  / 2.0, current_img_height  / 2.0]
+        ax.imshow(image_rgba, extent=original_image_display_extent, origin='upper', aspect='auto', alpha=0.5, zorder=-5)
         
         # Circle centered at the flat object's center (0,0) with the inscribed radius
         ref_circle_object_center = Circle((0, 0), inscribed_radius,
@@ -2844,90 +2775,84 @@ static_tasks = {
 # IMAGE UPLOAD ROUTE
 ########################################
 
-# Assume 'app' is your Flask app instance, configured elsewhere
-# app = Flask(__name__)
-# app.config['UPLOAD_FOLDER'] = 'uploads' # Example
-# app.secret_key = 'supersecretkey' # Necessary for sessions
-
-# Assume these are defined elsewhere as in your original code
-# global_image_rgba, img_height, img_width, img_aspect_ratio, H, W = None, None, None, None, None, None
-# interactive_tasks = {}
-# DEFAULT_IMAGE_PATH = 'path/to/default/image.png'
-# def load_and_process_image(filepath):
-#     # Placeholder for your image loading and processing logic
-#     # This function should update the global variables like img_height, img_width etc.
-#     global img_height, img_width, img_aspect_ratio, global_image_rgba
-#     # Example:
-#     # from PIL import Image
-#     # img = Image.open(filepath)
-#     # global_image_rgba = img.convert("RGBA")
-#     # img_width, img_height = img.size
-#     # img_aspect_ratio = img_width / img_height if img_height > 0 else 0
-#     print(f"Image loaded from {filepath}, dimensions: {img_width}x{img_height}")
-#     pass
-
-# Ensure the base upload folder exists
-# if not os.path.exists(app.config['UPLOAD_FOLDER']):
-#    os.makedirs(app.config['UPLOAD_FOLDER'])
-
 @app.route('/upload', methods=["POST"])
 def upload_file():
-    global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W, interactive_tasks
-    if "image_file" not in request.files:
-        return redirect(url_for("index")) # Assuming 'index' is a valid route
-
+    # REMOVE: global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W
+    if "image_file" not in request.files: return redirect(url_for("index"))
     file = request.files["image_file"]
-    if file.filename == "":
-        return redirect(url_for("index"))
+    if file.filename == "": return redirect(url_for("index"))
 
-    filename = secure_filename(file.filename)
-
-    # --- MODIFICATION START ---
-    # Get or create a unique folder ID for the session
-    if 'user_folder_id' not in session:
-        session['user_folder_id'] = str(uuid.uuid4())
+    # Generate a unique filename
+    base_filename = secure_filename(file.filename)
+    unique_suffix = str(uuid.uuid4())
+    unique_filename = f"{unique_suffix}_{base_filename}"
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
     
-    user_specific_folder_id = session['user_folder_id']
-    
-    # Create the full path for the session-specific upload directory
-    session_upload_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_specific_folder_id)
-    
-    # Ensure the session-specific directory exists
-    os.makedirs(session_upload_folder, exist_ok=True)
-    
-    filepath = os.path.join(session_upload_folder, filename)
-    # --- MODIFICATION END ---
-
     try:
         file.save(filepath)
-        load_and_process_image(filepath)
-        H, W = img_height, img_width
+        # Process with MAX_DIMENSION for general UI/session storage
+        _rgba_data, h, w, aspect = load_and_process_image(filepath, MAX_DIMENSION)
+        
+        # Store unique filename and processed dimensions in session
+        session['uploaded_image_filename'] = unique_filename
+        session['processed_image_height'] = h
+        session['processed_image_width'] = w
+        session['processed_image_aspect_ratio'] = aspect
+        
+        # REMOVE direct modification of interactive_tasks dictionary here.
+        # This will be handled in interactive_task_page route.
+        # OLD: H, W = img_height, img_width 
+        # OLD: if "5" in interactive_tasks: ...
+        # OLD: if "6" in interactive_tasks: ...
+        # OLD: if "9" in interactive_tasks: ...
 
+    except Exception as e:
+        logging.error(f"Error uploading/processing {unique_filename}: {e}", exc_info=True)
+        # If upload fails, clear session data and rely on defaults
+        session.pop('uploaded_image_filename', None)
+        session.pop('processed_image_height', None)
+        session.pop('processed_image_width', None)
+        session.pop('processed_image_aspect_ratio', None)
+    
+    return redirect(url_for("index"))
+@app.route('/upload', methods=["POST"])
+def upload_file(): 
+    global image_rgba, current_img_height , current_img_width, img_aspect_ratio, H, W
+    if "image_file" not in request.files: return redirect(url_for("index"))
+    file = request.files["image_file"]
+    if file.filename == "": return redirect(url_for("index"))
+    
+    filename = secure_filename(file.filename)
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+    try:
+        file.save(filepath)
+        load_and_process_image(filepath) 
+        H, W = current_img_height , current_img_width 
+        
         # Update slider configurations that depend on image dimensions
-        # (Your existing logic for updating interactive_tasks remains the same)
         if "5" in interactive_tasks:
-            interactive_tasks["5"]["sliders"][0]["max"] = int(3 * img_width)
-            interactive_tasks["5"]["sliders"][0]["value"] = int(img_width / 10.0 +1)
-            interactive_tasks["5"]["sliders"][0]["step"] = max(1,int(img_width/20))
-            interactive_tasks["5"]["sliders"][1]["min"] = int(-img_height) # Slider range
-            interactive_tasks["5"]["sliders"][1]["max"] = int(img_height)  # Slider range
-            interactive_tasks["5"]["sliders"][1]["step"] = max(1,int(img_height/20))
-            interactive_tasks["5"]["sliders"][2]["min"] = int(max(img_width, img_height) * 1.5) # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["max"] = int(max(img_width, img_height) * 5)   # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["value"] = int(max(img_width, img_height) * 3) # Renamed from max_val
+            interactive_tasks["5"]["sliders"][0]["max"] = int(3 * current_img_width)
+            interactive_tasks["5"]["sliders"][0]["value"] = int(current_img_width / 10.0 +1)
+            interactive_tasks["5"]["sliders"][0]["step"] = max(1,int(current_img_width/20))
+            interactive_tasks["5"]["sliders"][1]["min"] = int(-current_img_height ) # Slider range
+            interactive_tasks["5"]["sliders"][1]["max"] = int(current_img_height )  # Slider range
+            interactive_tasks["5"]["sliders"][1]["step"] = max(1,int(current_img_height /20))
+            interactive_tasks["5"]["sliders"][2]["min"] = int(max(current_img_width, current_img_height ) * 1.5)
+            interactive_tasks["5"]["sliders"][2]["max"] = int(max(current_img_width, current_img_height ) * 5)
+            interactive_tasks["5"]["sliders"][2]["value"] = int(max(current_img_width, current_img_height ) * 3)
 
         if "6" in interactive_tasks:
-            interactive_tasks["6"]["sliders"][0]["max"] = int(3 * img_width)
-            interactive_tasks["6"]["sliders"][0]["value"] = int(1.5*img_width)
-            interactive_tasks["6"]["sliders"][0]["step"] = max(1,int(img_width/20))
-            interactive_tasks["6"]["sliders"][1]["min"] = -int(1.5 * img_height) # Slider range
-            interactive_tasks["6"]["sliders"][1]["max"] = int(1.5 * img_height)  # Slider range
-            interactive_tasks["6"]["sliders"][1]["step"] = max(1,int(img_height/20))
-            interactive_tasks["6"]["sliders"][3]["max"] = int(2*img_width)
-            interactive_tasks["6"]["sliders"][3]["value"] = int(0.75*img_width)
-            interactive_tasks["6"]["sliders"][3]["step"] = max(1,int(img_width/20))
+            interactive_tasks["6"]["sliders"][0]["max"] = int(3 * current_img_width)
+            interactive_tasks["6"]["sliders"][0]["value"] = int(1.5*current_img_width)
+            interactive_tasks["6"]["sliders"][0]["step"] = max(1,int(current_img_width/20))
+            interactive_tasks["6"]["sliders"][1]["min"] = -int(1.5 * current_img_height ) # Slider range
+            interactive_tasks["6"]["sliders"][1]["max"] = int(1.5 * current_img_height )  # Slider range
+            interactive_tasks["6"]["sliders"][1]["step"] = max(1,int(current_img_height /20))
+            interactive_tasks["6"]["sliders"][3]["max"] = int(2*current_img_width)
+            interactive_tasks["6"]["sliders"][3]["value"] = int(0.75*current_img_width)
+            interactive_tasks["6"]["sliders"][3]["step"] = max(1,int(current_img_width/20))
             if "extra_context" not in interactive_tasks["6"]: interactive_tasks["6"]["extra_context"] = {}
-            interactive_tasks["6"]["extra_context"]["img_width"] = img_width
+            interactive_tasks["6"]["extra_context"]["current_img_width"] = current_img_width
         
         if "9" in interactive_tasks:
             default_R_t9 = interactive_tasks["9"]["sliders"][0]["value"] 
@@ -2941,13 +2866,10 @@ def upload_file():
                 interactive_tasks["9"]["sliders"][1]["value"] = round(min_obj_center_x_t9,2)
 
     except Exception as e:
-        logging.error(f"Error uploading/processing {filename} to {filepath}: {e}", exc_info=True)
-        # Fallback to default image
-        # Ensure DEFAULT_IMAGE_PATH is accessible and correctly defined
-        load_and_process_image(DEFAULT_IMAGE_PATH)
-        H, W = img_height, img_width # Update H, W based on default image too
-
-    return redirect(url_for("index")) 
+        logging.error(f"Error uploading/processing {filename}: {e}", exc_info=True)
+        load_and_process_image(DEFAULT_IMAGE_PATH) 
+    
+    return redirect(url_for("index"))
 
 ########################################
 # ROUTE: Handle Plot (Interactive/Static)
@@ -3010,6 +2932,111 @@ def plot_task(task_id):
                 alpha_p = float(request.args.get("alpha", interactive_tasks["12a"]["sliders"][1]["value"]))
                 scale_12a = float(request.args.get("canvas_scale_12a", interactive_tasks["12a"]["sliders"][2]["value"]))
                 buf = generate_task12a_plot(theta_i, alpha_p, scale_12a, req_id_param)
+            else:
+                return "Interactive task plot generation not fully implemented.", 404
+            
+            if buf: return send_file(buf, mimetype="image/png")
+            else: return send_file(generate_blank_image(), mimetype="image/png")
+
+        except Exception as e:
+            logging.error(f"Error in interactive task {task_id} plot: {e}", exc_info=True)
+            return send_file(generate_blank_image(), mimetype="image/png")
+
+    elif task_id in static_tasks:
+        try:
+            buf = static_tasks[task_id]()
+            return send_file(buf, mimetype="image/png")
+        except Exception as e:
+            logging.error(f"Error in static task {task_id} plot: {e}", exc_info=True)
+            return send_file(generate_blank_image(), mimetype="image/png")
+    else:
+        return f"Plot for task {task_id} not defined.", 404
+
+@app.route('/plot/<task_id>')
+def plot_task(task_id):
+    req_id_param = request.args.get("_req_id", str(uuid.uuid4()))
+    
+    # Determine image path
+    uploaded_filename = session.get('uploaded_image_filename')
+    filepath_to_load = DEFAULT_IMAGE_PATH
+    if uploaded_filename:
+        potential_path = os.path.join(app.config['UPLOAD_FOLDER'], uploaded_filename)
+        if os.path.exists(potential_path):
+            filepath_to_load = potential_path
+        else:
+            logging.warning(f"Uploaded file {potential_path} not found, using default.")
+            session.pop('uploaded_image_filename', None) # Clear invalid session entry
+            # Potentially also clear session dimensions if they were tied to this file
+            session.pop('processed_image_height', None)
+            session.pop('processed_image_width', None)
+            session.pop('processed_image_aspect_ratio', None)
+
+
+    # Determine target dimension
+    if task_id == "10":
+        target_dim = MAX_DIMENSION * 2
+    else:
+        target_dim = MAX_DIMENSION
+
+    # Load and process the image for this specific request
+    # This ensures Task 10 gets its higher-res image, others get standard
+    # For tasks not using the image, these are loaded but not passed/used by them.
+    loaded_image_rgba, loaded_img_h, loaded_img_w, loaded_img_aspect = load_and_process_image(filepath_to_load, target_dim)
+
+    if task_id in interactive_tasks:
+        active_requests[task_id] = req_id_param
+        try:
+            buf = None
+            if task_id == "3":
+                v_log = float(request.args.get("v", interactive_tasks["3"]["sliders"][0]["value"]))
+                n_val = float(request.args.get("n", interactive_tasks["3"]["sliders"][1]["value"]))
+                y_val = float(request.args.get("y", interactive_tasks["3"]["sliders"][2]["value"]))
+                l_val = float(request.args.get("l", interactive_tasks["3"]["sliders"][3]["value"]))
+                buf = generate_task3_plot(v_log, n_val, y_val, l_val, req_id_param) # No image data needed
+            elif task_id == "4":
+                v_log = float(request.args.get("v_task4", interactive_tasks["4"]["sliders"][0]["value"]))
+                n1 = float(request.args.get("n1", interactive_tasks["4"]["sliders"][1]["value"]))
+                n2 = float(request.args.get("n2", interactive_tasks["4"]["sliders"][2]["value"]))
+                y = float(request.args.get("y_task4", interactive_tasks["4"]["sliders"][3]["value"]))
+                l = float(request.args.get("l_task4", interactive_tasks["4"]["sliders"][4]["value"]))
+                buf = generate_task4_plot(v_log, n1, n2, y, l, req_id_param) # No image data needed
+            elif task_id == "5":
+                off_x = float(request.args.get("offset_x", interactive_tasks["5"]["sliders"][0]["value"])) # Default values here might need adjustment if they depend on dynamic image size
+                off_y = float(request.args.get("offset_y", interactive_tasks["5"]["sliders"][1]["value"]))
+                can_size = float(request.args.get("canvas_size", interactive_tasks["5"]["sliders"][2]["value"]))
+                buf = generate_task5_plot(off_x, off_y, can_size, loaded_image_rgba, loaded_img_h, loaded_img_w, req_id_param)
+            elif task_id == "6": # Also Task 7
+                st_x = int(request.args.get("start_x", interactive_tasks["6"]["sliders"][0]["value"]))
+                st_y = int(request.args.get("start_y", interactive_tasks["6"]["sliders"][1]["value"]))
+                sc = int(request.args.get("scale", interactive_tasks["6"]["sliders"][2]["value"]))
+                f = int(request.args.get("f_val", interactive_tasks["6"]["sliders"][3]["value"]))
+                buf = generate_task6_plot(st_x, st_y, sc, f, loaded_image_rgba, loaded_img_h, loaded_img_w, req_id_param)
+            elif task_id == "8":
+                r = float(request.args.get("R_val_t8", interactive_tasks["8"]["sliders"][0]["value"]))
+                ox = float(request.args.get("obj_left_x_t8", interactive_tasks["8"]["sliders"][1]["value"]))
+                oy = float(request.args.get("obj_center_y_t8", interactive_tasks["8"]["sliders"][2]["value"]))
+                oh = float(request.args.get("obj_world_height_t8", interactive_tasks["8"]["sliders"][3]["value"]))
+                pz = float(request.args.get("plot_zoom_t8", interactive_tasks["8"]["sliders"][4]["value"]))
+                buf = generate_task8_plot_new(r, ox, oy, oh, pz, loaded_image_rgba, loaded_img_h, loaded_img_w, loaded_img_aspect, req_id_param)
+            elif task_id == "9":
+                r = float(request.args.get("R_val_t9", interactive_tasks["9"]["sliders"][0]["value"]))
+                ocx = float(request.args.get("obj_center_x_t9", interactive_tasks["9"]["sliders"][1]["value"]))
+                ocy = float(request.args.get("obj_center_y_t9", interactive_tasks["9"]["sliders"][2]["value"]))
+                ohf = float(request.args.get("obj_height_factor_t9", interactive_tasks["9"]["sliders"][3]["value"]))
+                pz = float(request.args.get("plot_zoom_t9", interactive_tasks["9"]["sliders"][4]["value"]))
+                buf = generate_task9_plot_new(r, ocx, ocy, ohf, pz, loaded_image_rgba, loaded_img_h, loaded_img_w, loaded_img_aspect, req_id_param)
+            elif task_id == "10":
+                rf_param = float(request.args.get("Rf", interactive_tasks["10"]["sliders"][0]["value"]))
+                arc_param = float(request.args.get("arc_angle", interactive_tasks["10"]["sliders"][1]["value"]))
+                # Task 10 now receives the potentially higher-resolution image data
+                buf = generate_task10_plot(rf_param, arc_param, loaded_image_rgba, loaded_img_h, loaded_img_w, req_id_param)
+            elif task_id == "11d":
+                alpha_param = float(request.args.get("alpha_11d", interactive_tasks["11d"]["sliders"][0]["value"]))
+                buf = generate_task11d_plot(alpha_param, req_id_param) # No image data needed
+            elif task_id == "12a":theta_i = float(request.args.get("ThetaI", interactive_tasks["12a"]["sliders"][0]["value"]))
+                alpha_p = float(request.args.get("alpha", interactive_tasks["12a"]["sliders"][1]["value"]))
+                scale_12a = float(request.args.get("canvas_scale_12a", interactive_tasks["12a"]["sliders"][2]["value"]))
+                buf = generate_task12a_plot(theta_i, alpha_p, scale_12a, req_id_param) # No image data needed
             else:
                 return "Interactive task plot generation not fully implemented.", 404
             

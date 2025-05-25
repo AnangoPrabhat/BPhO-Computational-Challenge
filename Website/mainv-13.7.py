@@ -5,7 +5,7 @@ import uuid
 import logging
 from math import isqrt, cos, sin, radians, pi, log10, acos, atan2, degrees, sqrt # Added sqrt
 from time import perf_counter
-from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify, session
+from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify
 from werkzeug.utils import secure_filename
 import numpy as np
 import matplotlib.pyplot as plt
@@ -18,17 +18,15 @@ from skimage.transform import resize
 import matplotlib.image as mpimg
 
 
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
-app.secret_key = os.urandom(24) # Or a fixed secret key
 
 # Configure upload folder and maximum dimensions for user uploaded images
 UPLOAD_FOLDER = './uploads'
 STATIC_FOLDER = './static'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(STATIC_FOLDER, exist_ok=True) # Ensure static folder exists
-MAX_DIMENSION = 192  # maximum width or height (in pixels)
+MAX_DIMENSION = 120  # maximum width or height (in pixels)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # --- Ensure dummy logo and optics images exist in ./static for testing if not provided by user ---
@@ -1072,7 +1070,7 @@ task_overview = {
     "11a": {"title": "Task 11a: ε Curves", "desc": "Elevation angles using computed ε curves.", "subtasks": {}, "button_text": "11a: ε Curves"},
     "11b": {"title": "Task 11b: Color Mapping", "desc": "Rainbow curve color mapping.", "subtasks": {}, "button_text": "11b: Color Mapping"},
     "11c": {"title": "Task 11c: Refraction Scatter", "desc": "Scatter plot for refraction angles.", "subtasks": {}, "button_text": "11c: Refraction Scatter"},
-    "11d": {"title": "Task 11d: Interactive Rainbows", "desc": "Interactive refraction circles for rainbow.", "subtasks": {}, "button_text": "11d: Interactive Circles"},
+    "11d": {"title": "Task 11d: Interactive Circles", "desc": "Interactive refraction circles for rainbow.", "subtasks": {}, "button_text": "11d: Interactive Circles"},
     "12": {
         "title": "Task 12: Prism Analysis", "desc": "Prism light dispersion and angle analysis.",
         "subtasks": { "12a": "Interactive Prism Model", "12b": "Prism Angle Plots" },
@@ -2395,83 +2393,6 @@ def transform_points_convex_obj_right_t9(x_o_flat, y_o_flat, R_mirror):
         x_i_flat[off_axis], y_i_flat[off_axis] = x_i, y_i
         
     return x_i_flat, y_i_flat
-import numpy as np
-
-def transform_points_convex_obj_right_t9_thales(x_o_flat, y_o_flat, R_mirror):
-    """
-    Transforms object points (x_o_flat, y_o_flat) using the equations derived
-    from the provided geometric construction (referred to as "Thales" derivation).
-
-    The derivation involves a circle of radius R_mirror centered at the origin.
-    The transformation is:
-    x_i = (x_o * R_mirror^2) / (2*x_o*sqrt(R_mirror^2 - y_o^2) - R_mirror^2 + 2*y_o^2)
-    y_i = (y_o * R_mirror^2) / (2*x_o*sqrt(R_mirror^2 - y_o^2) - R_mirror^2 + 2*y_o^2)
-    This is valid for |y_o| <= R_mirror.
-
-    Args:
-        x_o_flat (np.ndarray): Flattened array of object x-coordinates.
-        y_o_flat (np.ndarray): Flattened array of object y-coordinates.
-        R_mirror (float): The radius of the circle used in the transformation.
-
-    Returns:
-        tuple[np.ndarray, np.ndarray]: Flattened arrays of image x and y coordinates.
-    """
-    x_i_flat = np.full_like(x_o_flat, np.nan)
-    y_i_flat = np.full_like(y_o_flat, np.nan)
-
-    if R_mirror <= 0:
-        # Radius must be positive for the geometry to be well-defined.
-        return x_i_flat, y_i_flat
-
-    # Ensure inputs are numpy arrays for vectorized operations
-    x_o = np.asarray(x_o_flat)
-    y_o = np.asarray(y_o_flat)
-
-    # The derivation for x_A = sqrt(R_mirror^2 - y_o^2) requires |y_o| <= R_mirror.
-    # Create a mask for points where the transformation is defined.
-    # Using np.isclose for the boundary |y_o| == R_mirror is implicitly handled
-    # by sqrt unless y_o is slightly larger than R_mirror due to float precision.
-    # We will process points where R_mirror^2 - y_o^2 >= 0.
-    valid_y_mask = (y_o**2 <= R_mirror**2) # Equivalent to |y_o| <= R_mirror
-
-    # Select only the points that satisfy the condition for processing
-    # All other points will remain NaN
-    if np.any(valid_y_mask):
-        a = x_o[valid_y_mask]
-        b = y_o[valid_y_mask]
-
-        R_sq = R_mirror**2
-
-        # Calculate x_A = sqrt(R_mirror^2 - y_o^2)
-        # np.sqrt will produce NaN for negative inputs if any slip through,
-        # but valid_y_mask should prevent R_sq - b**2 < 0.
-        # Add np.maximum to prevent issues from tiny negative numbers due to precision.
-        x_A_val_sq = R_sq - b**2
-        x_A_val = np.sqrt(np.maximum(0, x_A_val_sq)) # x_A is always non-negative
-
-        # Calculate the common denominator for x_i and y_i
-        # Denominator D = 2*a*x_A - R_sq + 2*b^2
-        denominator_val = 2 * a * x_A_val - R_sq + 2 * b**2
-
-        # Calculate transformed coordinates using np.divide for safe division by zero (results in inf)
-        # Numerator for x_i is a * R_sq
-        # Numerator for y_i is b * R_sq
-        with np.errstate(divide='ignore', invalid='ignore'): # Suppress warnings for 0/0 or x/0
-            x_i_processed = np.divide(a * R_sq, denominator_val)
-            y_i_processed = np.divide(b * R_sq, denominator_val)
-        
-        # Handle cases where denominator was zero, and numerator was also zero (0/0 -> NaN)
-        # This occurs if a=0 and b=0 (object at origin).
-        # Our formula gives (0,0) -> (0,0) because den = -R_sq != 0.
-        # If R_mirror = 0, this was caught.
-        # If a point results in 0/0 for other reasons, it should be NaN.
-        # np.divide(0,0) results in NaN, which is desired.
-        # np.divide(non_zero, 0) results in inf, which is also desired (image at infinity).
-
-        x_i_flat[valid_y_mask] = x_i_processed
-        y_i_flat[valid_y_mask] = y_i_processed
-        
-    return x_i_flat, y_i_flat
 
 def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, obj_height_factor, plot_zoom, request_id):
     global global_image_rgba, img_height, img_width, img_aspect_ratio
@@ -2497,7 +2418,7 @@ def generate_task9_plot_new(R_val, obj_center_x_from_C, obj_center_y_from_axis, 
         xo_mesh_C, yo_mesh_axis = np.meshgrid(x_obj_corners_from_C, y_obj_corners_from_axis)
         
         # Transform points (assuming transform function expects coords relative to C)
-        xi_flat_C, yi_flat_axis = transform_points_convex_obj_right_t9_thales(xo_mesh_C.flatten(), yo_mesh_axis.flatten(), R_val)
+        xi_flat_C, yi_flat_axis = transform_points_convex_obj_right_t9(xo_mesh_C.flatten(), yo_mesh_axis.flatten(), R_val)
         xi_mesh_C, yi_mesh_axis = xi_flat_C.reshape(xo_mesh_C.shape), yi_flat_axis.reshape(yo_mesh_axis.shape)
 
         fig=Figure(figsize=(9,7)); ax=fig.add_subplot(111); fig.subplots_adjust(left=0.08,right=0.82,top=0.92,bottom=0.1)
@@ -2843,68 +2764,21 @@ static_tasks = {
 ########################################
 # IMAGE UPLOAD ROUTE
 ########################################
-
-# Assume 'app' is your Flask app instance, configured elsewhere
-# app = Flask(__name__)
-# app.config['UPLOAD_FOLDER'] = 'uploads' # Example
-# app.secret_key = 'supersecretkey' # Necessary for sessions
-
-# Assume these are defined elsewhere as in your original code
-# global_image_rgba, img_height, img_width, img_aspect_ratio, H, W = None, None, None, None, None, None
-# interactive_tasks = {}
-# DEFAULT_IMAGE_PATH = 'path/to/default/image.png'
-# def load_and_process_image(filepath):
-#     # Placeholder for your image loading and processing logic
-#     # This function should update the global variables like img_height, img_width etc.
-#     global img_height, img_width, img_aspect_ratio, global_image_rgba
-#     # Example:
-#     # from PIL import Image
-#     # img = Image.open(filepath)
-#     # global_image_rgba = img.convert("RGBA")
-#     # img_width, img_height = img.size
-#     # img_aspect_ratio = img_width / img_height if img_height > 0 else 0
-#     print(f"Image loaded from {filepath}, dimensions: {img_width}x{img_height}")
-#     pass
-
-# Ensure the base upload folder exists
-# if not os.path.exists(app.config['UPLOAD_FOLDER']):
-#    os.makedirs(app.config['UPLOAD_FOLDER'])
-
 @app.route('/upload', methods=["POST"])
-def upload_file():
-    global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W, interactive_tasks
-    if "image_file" not in request.files:
-        return redirect(url_for("index")) # Assuming 'index' is a valid route
-
+def upload_file(): 
+    global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W
+    if "image_file" not in request.files: return redirect(url_for("index"))
     file = request.files["image_file"]
-    if file.filename == "":
-        return redirect(url_for("index"))
-
+    if file.filename == "": return redirect(url_for("index"))
+    
     filename = secure_filename(file.filename)
-
-    # --- MODIFICATION START ---
-    # Get or create a unique folder ID for the session
-    if 'user_folder_id' not in session:
-        session['user_folder_id'] = str(uuid.uuid4())
-    
-    user_specific_folder_id = session['user_folder_id']
-    
-    # Create the full path for the session-specific upload directory
-    session_upload_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_specific_folder_id)
-    
-    # Ensure the session-specific directory exists
-    os.makedirs(session_upload_folder, exist_ok=True)
-    
-    filepath = os.path.join(session_upload_folder, filename)
-    # --- MODIFICATION END ---
-
+    filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
     try:
         file.save(filepath)
-        load_and_process_image(filepath)
-        H, W = img_height, img_width
-
+        load_and_process_image(filepath) 
+        H, W = img_height, img_width 
+        
         # Update slider configurations that depend on image dimensions
-        # (Your existing logic for updating interactive_tasks remains the same)
         if "5" in interactive_tasks:
             interactive_tasks["5"]["sliders"][0]["max"] = int(3 * img_width)
             interactive_tasks["5"]["sliders"][0]["value"] = int(img_width / 10.0 +1)
@@ -2912,9 +2786,9 @@ def upload_file():
             interactive_tasks["5"]["sliders"][1]["min"] = int(-img_height) # Slider range
             interactive_tasks["5"]["sliders"][1]["max"] = int(img_height)  # Slider range
             interactive_tasks["5"]["sliders"][1]["step"] = max(1,int(img_height/20))
-            interactive_tasks["5"]["sliders"][2]["min"] = int(max(img_width, img_height) * 1.5) # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["max"] = int(max(img_width, img_height) * 5)   # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["value"] = int(max(img_width, img_height) * 3) # Renamed from max_val
+            interactive_tasks["5"]["sliders"][2]["min"] = int(max(img_width, img_height) * 1.5)
+            interactive_tasks["5"]["sliders"][2]["max"] = int(max(img_width, img_height) * 5)
+            interactive_tasks["5"]["sliders"][2]["value"] = int(max(img_width, img_height) * 3)
 
         if "6" in interactive_tasks:
             interactive_tasks["6"]["sliders"][0]["max"] = int(3 * img_width)
@@ -2941,13 +2815,10 @@ def upload_file():
                 interactive_tasks["9"]["sliders"][1]["value"] = round(min_obj_center_x_t9,2)
 
     except Exception as e:
-        logging.error(f"Error uploading/processing {filename} to {filepath}: {e}", exc_info=True)
-        # Fallback to default image
-        # Ensure DEFAULT_IMAGE_PATH is accessible and correctly defined
-        load_and_process_image(DEFAULT_IMAGE_PATH)
-        H, W = img_height, img_width # Update H, W based on default image too
-
-    return redirect(url_for("index")) 
+        logging.error(f"Error uploading/processing {filename}: {e}", exc_info=True)
+        load_and_process_image(DEFAULT_IMAGE_PATH) 
+    
+    return redirect(url_for("index"))
 
 ########################################
 # ROUTE: Handle Plot (Interactive/Static)
