@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+
+{% block title %}Vision Simulator{% endblock %}
+
+{% block head_extra %}
+    <script>
+        // OPTICAL_CONSTANTS is critical and must be defined before simulator_draw.js loads/executes.
+        // Flask's tojson | safe filter handles JSON serialization and escaping.
+        const OPTICAL_CONSTANTS = JSON.parse('{{ optical_constants | tojson | safe }}');
+        console.log("HTML OPTICAL_CONSTANTS:", OPTICAL_CONSTANTS); // For debugging load order
+        const IMAGE_FOR_JS = "{{ image_for_js }}";
+    </script>
+{% endblock %}
+
+{% block content %}
+    <h2>Vision Simulator 👁️</h2>
+    <p>This tool simulates how an eye with a specific refractive error sees an object, and how corrective lenses can change the focus.
+    Myopia (short-sightedness) means the eye focuses light in front of the retina. It's represented by a <strong>negative (-)</strong> inherent error value and corrected with a negative (diverging) lens.
+    Hyperopia (long-sightedness) means the eye focuses light behind the retina. It's represented by a <strong>positive (+)</strong> inherent error value and corrected with a positive (converging) lens.
+    </p>
+    <p><strong>Controls:</strong> Click and drag on the canvas to pan. Use mouse wheel to zoom. Default view centers on the corrective lens plane.</p>
+
+    <div class="simulator-container">
+        <div class="controls">
+            <h4>Eye & Object Configuration:</h4>
+            <div class="control-group">
+                <label for="inherentError">Simulated Eye's Inherent Error (D):</label>
+                <input type="number" id="inherentError" value="0.0" step="0.25" min="-10" max="10" title="Negative for myopia, positive for hyperopia.">
+                <small>E.g., -2.0 for 2D Myopia, +1.5 for 1.5D Hyperopia.</small>
+            </div>
+            <div class="control-group">
+                <label for="objectDistance">Object Distance from Corrective Lens (m):</label>
+                <input type="range" id="objectDistance" value="2" min="0.1" max="10" step="0.1">
+                <span id="objectDistanceVal">2 m</span>
+            </div>
+            <div class="control-group">
+                <label for="objectYOffset">Object Y-Offset from Optical Axis (m):</label>
+                <input type="range" id="objectYOffset" value="0" min="-0.05" max="0.05" step="0.005">
+                <span id="objectYOffsetVal">0.000 m</span>
+            </div>
+
+            <h4>Corrective Lens Mode:</h4>
+            <div class="control-group">
+                <input type="radio" id="modeUncorrected" name="lensMode" value="uncorrected" checked>
+                <label for="modeUncorrected"><strong>Uncorrected Eye</strong></label>
+            </div>
+            <div class="control-group">
+                <input type="radio" id="modeManual" name="lensMode" value="manual">
+                <label for="modeManual"><strong>Manual Corrective Lens (D):</strong></label>
+                <input type="number" id="manualLensPower" value="0.0" step="0.25" disabled>
+            </div>
+            <div class="control-group">
+                <input type="radio" id="modePrescription" name="lensMode" value="prescription">
+                <label for="modePrescription"><strong>Prescription Mode</strong></label><br>
+                <label for="glassesRx" class="sub-label">Base Glasses Rx (D):</label>
+                <input type="number" id="glassesRx" value="0.0" step="0.25" disabled>
+                <label for="shiftRx" class="sub-label">Shift from Rx (D):</label>
+                <input type="range" id="shiftRx" value="0.0" min="-2.0" max="2.0" step="0.25" disabled>
+                <span id="shiftRxVal">0.0 D</span>
+            </div>
+            <button id="updateSimulationBtn" class="button-primary">Redraw Simulation</button>
+        </div>
+        <div class="canvas-area">
+            <canvas id="simulatorCanvas" width="800" height="450"></canvas>
+            <p id="infoDisplay" class="info-text"></p>
+        </div>
+    </div>
+    <div class="explanation-section">
+        <h4>Understanding the Simulation:</h4>
+        <ul>
+            <li><strong>Optical Axis:</strong> The central grey line.</li>
+            <li><strong>Lenses:</strong> The "Corrective Lens" (if active) is shown first (at X=0 world coordinate), followed by the "Eye Lens".</li>
+            <li><strong>Retina:</strong> The red vertical line where the image should ideally focus.</li>
+            <li><strong>Object:</strong> Shown on the left. Its distance is measured from the Corrective Lens plane.</li>
+            <li><strong>Rays & F (Image):</strong> Light rays (orange/purple) trace from the object. 'F' or 'I' markers indicate image locations.</li>
+        </ul>
+    </div>
+{% endblock %}
+
+{% block scripts_extra %}
+    <script src="{{ url_for('static', filename='js/simulator_draw.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/simulator_controls.js') }}"></script>
+{% endblock %}
