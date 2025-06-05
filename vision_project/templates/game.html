@@ -1,0 +1,83 @@
+{% extends "layout.html" %}
+
+{% block title %}Eye Test Game{% endblock %}
+
+{% block head_extra %}
+    <script>
+        const GAME_CONSTANTS = JSON.parse('{{ game_constants | tojson | safe }}');
+        const INITIAL_GAME_DURATION = {{ game_duration }};
+    </script>
+{% endblock %}
+
+{% block content %}
+    <h2>Eye Test Game 🧐</h2>
+    <div class="game-container">
+        <div id="gameStartScreen">
+            <p class="patient-intro">A new patient has arrived. They say: <br><em>"{{ patient_statement }}"</em></p>
+            <p>Your goal is to determine the corrective lens prescription they need. You have <strong>{{ game_duration // 60 }} minutes</strong>.</p>
+            <p>Remember:
+                <ul>
+                    <li><strong>Myopia (short-sightedness)</strong> is an eye error where distant objects are blurry. The eye focuses light <em>in front</em> of the retina. It's typically a <em>negative</em> dioptric error (e.g., -2.0 D patient error) and requires a <em>negative</em> power corrective lens.</li>
+                    <li><strong>Hyperopia (long-sightedness)</strong> is an eye error where near objects (and sometimes distant) are blurry. The eye focuses light <em>behind</em> the retina. It's typically a <em>positive</em> dioptric error (e.g., +2.0 D patient error) and requires a <em>positive</em> power corrective lens.</li>
+                    <li>The corrective lens power you prescribe should aim to counteract the patient's eye error (i.e., be the opposite sign and similar magnitude).</li>
+                </ul>
+            </p>
+            <button id="startGameBtn" class="button-start-game">Begin Eye Test!</button>
+        </div>
+
+        <div id="gameplayScreen" style="display: none;">
+            <div id="timerDisplay">Time Remaining: {{ "%02d:%02d" | format(game_duration // 60, game_duration % 60) }}</div>
+            
+            <div class="game-controls">
+                <p>Offer two test lenses to the patient. They will tell you which one makes their vision less blurry.</p>
+                <div class="control-group">
+                    <label for="lens1Power">Test Lens 1 Power (D):</label>
+                    <input type="number" id="lens1Power" step="0.25" value="0.00">
+                </div>
+                <div class="control-group">
+                    <label for="lens2Power">Test Lens 2 Power (D):</label>
+                    <input type="number" id="lens2Power" step="0.25" value="-0.25">
+                </div>
+                <button id="askPatientBtn" class="button-primary">Ask Patient</button>
+            </div>
+
+            <div id="patientFeedback" class="info-box">Patient says: ...</div>
+            
+            <div class="final-guess-area" id="finalGuessSection" style="display: none;">
+                <hr>
+                <h4>Time's Up or Make Your Final Guess!</h4>
+                <label for="finalPrescriptionGuess">Your Final Corrective Lens Prescription Guess (D):</label>
+                <input type="number" id="finalPrescriptionGuess" step="0.01" value="0.00">
+                <button id="submitGuessBtn" class="button-action">Submit Final Guess</button>
+            </div>
+
+            <div id="gameResults" style="display: none;" class="info-box results-box">
+                <h3>Results:</h3>
+                <p id="actualPatientError"></p>
+                <p id="idealCorrection"></p>
+                <p id="yourGuess"></p>
+                <p id="differenceAmount"></p>
+                <p id="gameScore"></p>
+                <p id="winMessage" class="win-loss-message"></p>
+                <button onclick="window.location.href='{{url_for('game_start')}}'" class="button-primary">Play Again?</button>
+            </div>
+
+            <div class="spoiler-section">
+                <button id="toggleSpoilerBlurBtn" class="button-secondary">Toggle Spoiler: Check Blur Values</button>
+                <div id="spoilerBlurContainer" style="display:none;" class="info-box">
+                    <p><small>This tool calculates the theoretical blurriness for the patient's eye with a given test lens. Lower values are better.</small></p>
+                    <div class="control-group">
+                        <label for="spoilerTestLensPower">Test Lens Power (D): </label>
+                        <input type="number" id="spoilerTestLensPower" step="0.25" value="0.00">
+                        <button id="getSpoilerBlurBtn" class="button-action">Get Blur Value</button>
+                    </div>
+                    <p id="spoilerBlurResult" class="info-text-small">Blurriness: N/A</p>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}
+
+{% block scripts_extra %}
+    <script src="{{ url_for('static', filename='js/game_logic.js') }}"></script>
+{% endblock %}
