@@ -1122,6 +1122,8 @@ main_page_template = '''
 <head>
   <title>Physics Optics Challenge Tasks</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#004080"/>
   <style>
     body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f4f6f8; color: #333; line-height: 1.6; }
     .header-banner { display: flex; align-items: center; justify-content: space-between; padding: 10px 20px; background-color: #004080; color: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
@@ -1184,6 +1186,18 @@ main_page_template = '''
   <div class="credits">
     <p>Anango Prabhat, Thales Swanson</p>
   </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
 </body>
 </html>
 '''
