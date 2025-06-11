@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Vision Optics Simulator & Eye Test Game{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    {% block head_extra %}{% endblock %}
+</head>
+<body>
+    <header>
+        <h1>👓 Vision Optics Simulator & Eye Test Game 🔬</h1>
+        <nav>
+            <a href="{{ url_for('index') }}" class="nav-button">Home</a> 
+            <a href="{{ url_for('simulator') }}" class="nav-button">Vision Simulator</a> 
+            <a href="{{ url_for('game_start') }}" class="nav-button">Eye Test Game</a>
+        </nav>
+    </header>
+    <main>
+        {% block content %}{% endblock %}
+    </main>
+    <footer>
+        <p>&copy; 2025 Vision App Project. Myopia: trouble seeing far (corrected with negative lens). Hyperopia: trouble seeing near (corrected with positive lens).</p>
+        {% if session.get('user_uuid') %}
+        {% endif %}
+    </footer>
+    <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+    {% block scripts_extra %}{% endblock %}
+</body>
+</html>
