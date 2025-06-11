@@ -3,77 +3,84 @@
 {% block title %}Vision Simulator{% endblock %}
 
 {% block head_extra %}
+    <style>
+        .explanation-text {
+            font-size: 0.85em; color: #555;
+            margin-top: 5px; margin-bottom: 10px; padding-left: 18px;
+        }
+        .canvas-area h4 { margin-top: 20px; margin-bottom: 5px; }
+        .detail-controls { text-align: center; margin-top: 5px; }
+        .zoom-button {
+            font-size: 1.2em; font-weight: bold;
+            padding: 2px 10px; margin: 0 5px;
+            cursor: pointer; user-select: none;
+        }
+        .ray-legend { margin-top: 20px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; }
+        .ray-legend p { margin: 5px 0; }
+        .ray-legend .color-box {
+            display: inline-block; width: 15px; height: 15px;
+            vertical-align: middle; margin-right: 8px; border: 1px solid #ccc;
+        }
+    </style>
     <script>
-        // OPTICAL_CONSTANTS is critical and must be defined before simulator_draw.js loads/executes.
-        // Flask's tojson | safe filter handles JSON serialization and escaping.
         const OPTICAL_CONSTANTS = JSON.parse('{{ optical_constants | tojson | safe }}');
-        console.log("HTML OPTICAL_CONSTANTS:", OPTICAL_CONSTANTS); // For debugging load order
         const IMAGE_FOR_JS = "{{ image_for_js }}";
     </script>
 {% endblock %}
 
 {% block content %}
     <h2>Vision Simulator 👁️</h2>
-    <p>This tool simulates how an eye with a specific refractive error sees an object, and how corrective lenses can change the focus.
-    Myopia (short-sightedness) means the eye focuses light in front of the retina. It's represented by a <strong>negative (-)</strong> inherent error value and corrected with a negative (diverging) lens.
-    Hyperopia (long-sightedness) means the eye focuses light behind the retina. It's represented by a <strong>positive (+)</strong> inherent error value and corrected with a positive (converging) lens.
-    </p>
-    <p><strong>Controls:</strong> Click and drag on the canvas to pan. Use mouse wheel to zoom. Default view centers on the corrective lens plane.</p>
+    <p>This tool simulates how an eye focuses an image and how glasses can correct vision. A <strong>positive (+)</strong> inherent error represents <strong>Myopia</strong> (short-sightedness), and a <strong>negative (-)</strong> inherent error represents <strong>Hyperopia</strong> (long-sightedness).</p>
 
     <div class="simulator-container">
         <div class="controls">
             <h4>Eye & Object Configuration:</h4>
             <div class="control-group">
                 <label for="inherentError">Simulated Eye's Inherent Error (D):</label>
-                <input type="number" id="inherentError" value="0.0" step="0.25" min="-10" max="10" title="Negative for myopia, positive for hyperopia.">
-                <small>E.g., -2.0 for 2D Myopia, +1.5 for 1.5D Hyperopia.</small>
+                <input type="number" id="inherentError" value="0.0" step="0.25" min="-10" max="10" title="Positive for myopia, negative for hyperopia.">
+                <small>E.g., +2.0 for 2D Myopia, -1.5 for 1.5D Hyperopia.</small>
             </div>
             <div class="control-group">
-                <label for="objectDistance">Object Distance from Corrective Lens (m):</label>
+                <label for="objectDistance">Object Distance (m):</label>
                 <input type="range" id="objectDistance" value="2" min="0.1" max="10" step="0.1">
                 <span id="objectDistanceVal">2 m</span>
             </div>
-            <div class="control-group">
-                <label for="objectYOffset">Object Y-Offset from Optical Axis (m):</label>
-                <input type="range" id="objectYOffset" value="0" min="-0.05" max="0.05" step="0.005">
-                <span id="objectYOffsetVal">0.000 m</span>
-            </div>
 
-            <h4>Corrective Lens Mode:</h4>
+            <h4>Correction Mode:</h4>
             <div class="control-group">
                 <input type="radio" id="modeUncorrected" name="lensMode" value="uncorrected" checked>
                 <label for="modeUncorrected"><strong>Uncorrected Eye</strong></label>
+                <p class="explanation-text">Shows the eye's vision without any correction.</p>
             </div>
             <div class="control-group">
-                <input type="radio" id="modeManual" name="lensMode" value="manual">
-                <label for="modeManual"><strong>Manual Corrective Lens (D):</strong></label>
-                <input type="number" id="manualLensPower" value="0.0" step="0.25" disabled>
-            </div>
-            <div class="control-group">
-                <input type="radio" id="modePrescription" name="lensMode" value="prescription">
-                <label for="modePrescription"><strong>Prescription Mode</strong></label><br>
-                <label for="glassesRx" class="sub-label">Base Glasses Rx (D):</label>
+                <input type="radio" id="modeGlasses" name="lensMode" value="glasses">
+                <label for="modeGlasses"><strong>Glasses Mode</strong></label>
                 <input type="number" id="glassesRx" value="0.0" step="0.25" disabled>
-                <label for="shiftRx" class="sub-label">Shift from Rx (D):</label>
-                <input type="range" id="shiftRx" value="0.0" min="-2.0" max="2.0" step="0.25" disabled>
-                <span id="shiftRxVal">0.0 D</span>
+                 <p class="explanation-text">Simulates wearing glasses. Set the power of the corrective lens. For a perfect correction, the glasses power should be the negative of the eye's inherent error (e.g., +2.0D error needs -2.0D glasses).</p>
             </div>
-            <button id="updateSimulationBtn" class="button-primary">Redraw Simulation</button>
+
+            <div class="ray-legend">
+                <h4>Ray Diagram Legend</h4>
+                <p><span class="color-box" style="background-color: #B400B4;"></span><strong>Purple Rays:</strong> Show the path of light through the uncorrected eye.</p>
+                <p><span class="color-box" style="background-color: #FF7800;"></span><strong>Orange Rays:</strong> Show how the glasses bend light *before* it reaches the eye.</p>
+                <p>When glasses are active, the purple rays show how the eye focuses the light that has *already been bent* by the glasses.</p>
+            </div>
         </div>
         <div class="canvas-area">
-            <canvas id="simulatorCanvas" width="800" height="450"></canvas>
+            <h4>Overview (Auto-Zoom)</h4>
+            <canvas id="simulatorCanvasZoomedOut" width="800" height="450"></canvas>
             <p id="infoDisplay" class="info-text"></p>
+            
+            <hr style="margin: 30px 0;">
+
+            <h4>Detail View (Manual Control)</h4>
+            <p><small>Use the buttons below or click-drag and mouse-wheel-scroll on the canvas.</small></p>
+            <canvas id="simulatorCanvasZoomedIn" width="800" height="450"></canvas>
+            <div class="detail-controls">
+                <button id="zoomOutBtn" class="button-secondary zoom-button">-</button>
+                <button id="zoomInBtn" class="button-secondary zoom-button">+</button>
+            </div>
         </div>
-    </div>
-    <div class="explanation-section">
-        <h4>Understanding the Simulation:</h4>
-        <ul>
-            <li><strong>Optical Axis:</strong> The central grey line.</li>
-            <li><strong>Lenses:</strong> The "Corrective Lens" (if active) is shown first (at X=0 world coordinate), followed by the "Eye Lens".</li>
-            <li><strong>Retina:</strong> The red vertical line where the image should ideally focus.</li>
-            <li><strong>Object:</strong> Shown on the left. Its distance is measured from the Corrective Lens plane.</li>
-            <li><strong>Rays & F (Image):</strong> Light rays (orange/purple) trace from the object. 'F' or 'I' markers indicate image locations.</li>
-        </ul>
     </div>
 {% endblock %}
 

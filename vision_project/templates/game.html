@@ -15,11 +15,11 @@
         <div id="gameStartScreen">
             <p class="patient-intro">A new patient has arrived. They say: <br><em>"{{ patient_statement }}"</em></p>
             <p>Your goal is to determine the corrective lens prescription they need. You have <strong>{{ game_duration // 60 }} minutes</strong>.</p>
-            <p>Remember:
+            <p>Remember the sign convention:
                 <ul>
-                    <li><strong>Myopia (short-sightedness)</strong> is an eye error where distant objects are blurry. The eye focuses light <em>in front</em> of the retina. It's typically a <em>negative</em> dioptric error (e.g., -2.0 D patient error) and requires a <em>negative</em> power corrective lens.</li>
-                    <li><strong>Hyperopia (long-sightedness)</strong> is an eye error where near objects (and sometimes distant) are blurry. The eye focuses light <em>behind</em> the retina. It's typically a <em>positive</em> dioptric error (e.g., +2.0 D patient error) and requires a <em>positive</em> power corrective lens.</li>
-                    <li>The corrective lens power you prescribe should aim to counteract the patient's eye error (i.e., be the opposite sign and similar magnitude).</li>
+                    <li><strong>Myopia (short-sightedness)</strong>: The eye's focusing power is too strong, so light focuses <em>in front</em> of the retina. This is represented by a <strong>positive (+) eye error</strong> (e.g., +2.0 D) and requires a <strong>negative (-) corrective lens</strong>.</li>
+                    <li><strong>Hyperopia (long-sightedness)</strong>: The eye's focusing power is too weak, so light focuses <em>behind</em> the retina. This is represented by a <strong>negative (-) eye error</strong> (e.g., -2.0 D) and requires a <strong>positive (+) corrective lens</strong>.</li>
+                    <li>The corrective lens power you prescribe should aim to counteract the patient's eye error.</li>
                 </ul>
             </p>
             <button id="startGameBtn" class="button-start-game">Begin Eye Test!</button>
