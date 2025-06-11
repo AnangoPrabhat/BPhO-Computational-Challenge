@@ -3061,6 +3061,21 @@ def plot_task(task_id):
     else:
         return f"Plot for task {task_id} not defined.", 404
 
+@app.route('/manifest.json')
+def serve_manifest():
+    # This route serves the manifest file from your project's root directory.
+    return send_from_directory('.', 'manifest.json', mimetype='application/json')
+
+@app.route('/sw.js')
+def serve_service_worker():
+    # This route serves the service worker file.
+    # We add headers to prevent the browser from caching this file, which is a best practice.
+    response = send_from_directory('.', 'sw.js', mimetype='application/javascript')
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 10000)) 
     app.run(debug=True, host="0.0.0.0", port=port)
