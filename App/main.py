@@ -1211,6 +1211,8 @@ subtask_page_template = '''
 <head>
   <title>{{ parent_task_title }} - Subtasks</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#004080"/>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f4f6f8; padding:0; margin:0; color: #333; }
     .container { display: flex; flex-direction: column; align-items: center; padding: 20px; max-width: 700px; margin: 20px auto; background-color: #fff; border-radius: 8px; box-shadow: 0 1px 5px rgba(0,0,0,0.1); }
@@ -1258,6 +1260,17 @@ subtask_page_template = '''
         {% endif %}
     {% endfor %}
   </div>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
 </body>
 </html>
 '''
@@ -1272,6 +1285,8 @@ static_plot_page_template = '''
 <head>
   <title>{{ title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#004080"/>
   <style>
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: #f4f6f8; padding:10px; margin:0; color: #333; }
     .container { max-width: 850px; margin: 20px auto; background-color: #fff; padding: 25px; border-radius: 8px; box-shadow: 0 1px 5px rgba(0,0,0,0.1); }
@@ -1312,6 +1327,17 @@ static_plot_page_template = '''
          {% endif %}
      {% endfor %}
   </div>
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
 </body>
 </html>
 '''
