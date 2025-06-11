@@ -5,9 +5,11 @@ import uuid
 import logging
 from math import isqrt, cos, sin, radians, pi, log10, acos, atan2, degrees, sqrt # Added sqrt
 from time import perf_counter
-from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify, session
+from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify, session, send_from_directory
 from werkzeug.utils import secure_filename
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.colors import LinearSegmentedColormap
@@ -503,6 +505,8 @@ interactive_template = '''
 <head>  
   <title>{{ title }}</title>
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#004080"/>
   <style>
     body { font-family: Arial, sans-serif; padding: 10px; background-color: #f0f0f0; color: #333; }
     .container { max-width: 900px; margin: auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0,0,0,0.1); }
@@ -586,6 +590,18 @@ interactive_template = '''
          {% endif %}
       {% endfor %}
   </div>
+
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').then(registration => {
+          console.log('ServiceWorker registration successful with scope: ', registration.scope);
+        }, err => {
+          console.log('ServiceWorker registration failed: ', err);
+        });
+      });
+    }
+  </script>
 
   <script>
     var requestTimer = null;
