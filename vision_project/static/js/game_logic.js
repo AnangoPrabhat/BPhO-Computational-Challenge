@@ -1,5 +1,6 @@
 // game_logic.js
 document.addEventListener('DOMContentLoaded', () => {
+    // --- Element Grab ---
     const gameStartScreen = document.getElementById('gameStartScreen');
     const startGameBtn = document.getElementById('startGameBtn');
     const gameplayScreen = document.getElementById('gameplayScreen');
@@ -19,16 +20,19 @@ document.addEventListener('DOMContentLoaded', () => {
     const gameScoreP = document.getElementById('gameScore');
     const winMessageP = document.getElementById('winMessage');
 
-    // New Spoiler Blur Elements
-    const toggleSpoilerBlurBtn = document.getElementById('toggleSpoilerBlurBtn');
-    const spoilerBlurContainer = document.getElementById('spoilerBlurContainer');
-    const spoilerTestLensPowerInput = document.getElementById('spoilerTestLensPower');
-    const getSpoilerBlurBtn = document.getElementById('getSpoilerBlurBtn');
-    const spoilerBlurResultP = document.getElementById('spoilerBlurResult');
+    // Spoiler Elements
+    const toggleSpoilerBtn = document.getElementById('toggleSpoilerBtn');
+    const spoilerSection = document.getElementById('spoilerSection');
+    const lens1Info = document.getElementById('lens1Info');
+    const lens2Info = document.getElementById('lens2Info');
+    const lens1FocusInfo = document.getElementById('lens1FocusInfo');
+    const lens2FocusInfo = document.getElementById('lens2FocusInfo');
+
 
     let timerInterval;
     let timeLeft = INITIAL_GAME_DURATION;
 
+    // --- Game Flow ---
     startGameBtn.addEventListener('click', () => {
         gameStartScreen.style.display = 'none';
         gameplayScreen.style.display = 'block';
@@ -46,38 +50,65 @@ document.addEventListener('DOMContentLoaded', () => {
         timerInterval = setInterval(() => {
             timeLeft--;
             updateTimerDisplay();
-            if (timeLeft <= 0) endGameDueToTime();
+            if (timeLeft <= 0) {
+                endGameDueToTime();
+            }
         }, 1000);
+    }
+    
+    function setControlsState(disabled) {
+        askPatientBtn.disabled = disabled;
+        lens1PowerInput.disabled = disabled;
+        lens2PowerInput.disabled = disabled;
+        toggleSpoilerBtn.disabled = disabled;
     }
 
     function endGameDueToTime() {
         clearInterval(timerInterval);
         timerDisplay.textContent = "Time's Up!";
-        askPatientBtn.disabled = true;
-        lens1PowerInput.disabled = true;
-        lens2PowerInput.disabled = true;
+        setControlsState(true);
         finalGuessSection.style.display = 'block';
-        submitGuessBtn.disabled = false;
-        finalPrescriptionGuessInput.disabled = false;
-        toggleSpoilerBlurBtn.disabled = true; // Disable spoiler when time is up
-        getSpoilerBlurBtn.disabled = true;
     }
 
+    // --- Event Listeners ---
     askPatientBtn.addEventListener('click', async () => {
         askPatientBtn.disabled = true;
         patientFeedbackDiv.textContent = "Asking patient...";
+        
+        const lens1 = parseFloatSafe(lens1PowerInput.value);
+        const lens2 = parseFloatSafe(lens2PowerInput.value);
+
         try {
             const response = await fetch('/game/ask_patient', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ 
-                    lens1_power: parseFloatSafe(lens1PowerInput.value), 
-                    lens2_power: parseFloatSafe(lens2PowerInput.value) 
+                    lens1_power: lens1, 
+                    lens2_power: lens2 
                 })
             });
+            if (!response.ok) throw new Error(`Server error: ${response.statusText}`);
+            
             const data = await response.json();
-            patientFeedbackDiv.textContent = `${data.feedback || data.error || 'Unknown response'}`;
-            if (data.remaining_time !== undefined && data.remaining_time <= 0 && timeLeft > 0) endGameDueToTime();
+            patientFeedbackDiv.innerHTML = `<strong>Patient says:</strong> ${data.feedback || data.error || 'Unknown response'}`;
+            
+            // NEW: If we get the patient error, draw the spoiler diagrams
+            if (data.patient_error_D !== undefined && typeof drawGameSpoilerDiagrams === 'function') {
+                toggleSpoilerBtn.style.display = 'inline-block';
+                const configs = [
+                    { patient_error_D: data.patient_error_D, test_lens_D: lens1 },
+                    { patient_error_D: data.patient_error_D, test_lens_D: lens2 }
+                ];
+                const results = drawGameSpoilerDiagrams('gameRayCanvas1', 'gameRayCanvas2', configs);
+                lens1Info.textContent = `Lens 1 (${lens1.toFixed(2)} D)`;
+                lens2Info.textContent = `Lens 2 (${lens2.toFixed(2)} D)`;
+                lens1FocusInfo.textContent = results[0].infoText;
+                lens2FocusInfo.textContent = results[1].infoText;
+            }
+
+            if (data.remaining_time !== undefined && data.remaining_time <= 0 && timeLeft > 0) {
+                endGameDueToTime();
+            }
         } catch (error) {
             patientFeedbackDiv.textContent = `Network error: ${error.message}`;
         } finally {
@@ -102,13 +133,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 yourGuessP.textContent = `Your Guessed Corrective Lens: ${results.your_guess} D`;
                 differenceAmountP.textContent = `Difference from Ideal: ${results.difference_from_ideal} D`;
                 gameScoreP.textContent = `Score: ${results.score}`;
-                winMessageP.textContent = results.win ? "🎉 Congratulations! You're within ±0.25D - You Win! 🎉" : "Close! Try again next time!";
+                winMessageP.textContent = results.win ? "Congratulations! You're within ±0.25D - You Win!" : "Close! Try again next time!";
                 winMessageP.className = results.win ? 'win-loss-message win' : 'win-loss-message loss';
                 gameResultsDiv.style.display = 'block';
                 finalGuessSection.style.display = 'none';
-                askPatientBtn.disabled = true;
-                toggleSpoilerBlurBtn.disabled = true;
-                getSpoilerBlurBtn.disabled = true;
+                setControlsState(true);
             } else {
                 patientFeedbackDiv.textContent = `Error submitting: ${results.error || 'Unknown error.'}`;
                 if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
@@ -118,36 +147,8 @@ document.addEventListener('DOMContentLoaded', () => {
             if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
         }
     });
-
-    // New Spoiler Blur Logic
-    toggleSpoilerBlurBtn.addEventListener('click', () => {
-        spoilerBlurContainer.style.display = spoilerBlurContainer.style.display === 'none' ? 'block' : 'none';
+    
+    toggleSpoilerBtn.addEventListener('click', () => {
+        spoilerSection.style.display = (spoilerSection.style.display === 'none') ? 'block' : 'none';
     });
-
-    getSpoilerBlurBtn.addEventListener('click', async () => {
-        const testLensPower = parseFloatSafe(spoilerTestLensPowerInput.value);
-        getSpoilerBlurBtn.disabled = true;
-        spoilerBlurResultP.textContent = "Calculating blur...";
-        try {
-            const response = await fetch('/game/get_spoiler_blur_info', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({test_lens_power_D: testLensPower})
-            });
-            const data = await response.json();
-            if (response.ok) {
-                spoilerBlurResultP.textContent = `For Test Lens ${data.test_lens_power_D.toFixed(2)}D: Blurriness ≈ ${data.blurriness_value}. (${data.note})`;
-            } else {
-                spoilerBlurResultP.textContent = `Error: ${data.error || response.statusText}`;
-            }
-        } catch (err) {
-            spoilerBlurResultP.textContent = `Network error: ${err.message}`;
-        } finally {
-             if (timeLeft > 0) getSpoilerBlurBtn.disabled = false; // Re-enable if game still active
-        }
-    });
-
-    // Initialize
-    if (gameplayScreen) gameplayScreen.style.display = 'none'; // Ensure gameplay screen is hidden initially
-    if (gameStartScreen) gameStartScreen.style.display = 'block';
 });

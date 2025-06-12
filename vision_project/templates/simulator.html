@@ -21,49 +21,60 @@
             display: inline-block; width: 15px; height: 15px;
             vertical-align: middle; margin-right: 8px; border: 1px solid #ccc;
         }
+        canvas {
+            border: 1px solid #adb5bd;
+            background-color: #f0f4f8;
+            border-radius: 4px;
+            max-width: 100%;
+            height: auto;
+            cursor: grab;
+        }
     </style>
     <script>
         const OPTICAL_CONSTANTS = JSON.parse('{{ optical_constants | tojson | safe }}');
-        const IMAGE_FOR_JS = "{{ image_for_js }}";
+        const OBJECT_TYPE = "{{ object_type }}";
+        const OBJECT_IMAGE_URL = "{{ object_image_url }}";
     </script>
 {% endblock %}
 
 {% block content %}
-    <h2>Vision Simulator 👁️</h2>
+    <h2>Vision Simulator</h2>
     <p>This tool simulates how an eye focuses an image and how glasses can correct vision. A <strong>positive (+)</strong> inherent error represents <strong>Myopia</strong> (short-sightedness), and a <strong>negative (-)</strong> inherent error represents <strong>Hyperopia</strong> (long-sightedness).</p>
+    <p><strong>Improvement:</strong> The physics for glasses correction is now more accurate, and ray diagrams show proper two-stage refraction.</p>
 
     <div class="simulator-container">
         <div class="controls">
             <h4>Eye & Object Configuration:</h4>
             <div class="control-group">
                 <label for="inherentError">Simulated Eye's Inherent Error (D):</label>
-                <input type="number" id="inherentError" value="0.0" step="0.25" min="-10" max="10" title="Positive for myopia, negative for hyperopia.">
+                <input type="number" id="inherentError" value="2.0" step="0.25" min="-10" max="10" title="Positive for myopia, negative for hyperopia.">
                 <small>E.g., +2.0 for 2D Myopia, -1.5 for 1.5D Hyperopia.</small>
             </div>
             <div class="control-group">
                 <label for="objectDistance">Object Distance (m):</label>
-                <input type="range" id="objectDistance" value="2" min="0.1" max="10" step="0.1">
-                <span id="objectDistanceVal">2 m</span>
+                <input type="range" id="objectDistance" value="6" min="0.2" max="20" step="0.1">
+                <span id="objectDistanceVal">6.0 m</span>
             </div>
 
             <h4>Correction Mode:</h4>
             <div class="control-group">
                 <input type="radio" id="modeUncorrected" name="lensMode" value="uncorrected" checked>
                 <label for="modeUncorrected"><strong>Uncorrected Eye</strong></label>
-                <p class="explanation-text">Shows the eye's vision without any correction.</p>
+                <p class="explanation-text">Shows the eye's vision without any correction. Notice how an error results in a blurry image.</p>
             </div>
             <div class="control-group">
                 <input type="radio" id="modeGlasses" name="lensMode" value="glasses">
                 <label for="modeGlasses"><strong>Glasses Mode</strong></label>
-                <input type="number" id="glassesRx" value="0.0" step="0.25" disabled>
-                 <p class="explanation-text">Simulates wearing glasses. Set the power of the corrective lens. For a perfect correction, the glasses power should be the negative of the eye's inherent error (e.g., +2.0D error needs -2.0D glasses).</p>
+                <input type="number" id="glassesRx" value="-2.0" step="0.25" disabled>
+                 <p class="explanation-text">Simulates wearing glasses. A correct prescription (-1 * error) should produce a sharp image.</p>
             </div>
 
             <div class="ray-legend">
                 <h4>Ray Diagram Legend</h4>
-                <p><span class="color-box" style="background-color: #B400B4;"></span><strong>Purple Rays:</strong> Show the path of light through the uncorrected eye.</p>
-                <p><span class="color-box" style="background-color: #FF7800;"></span><strong>Orange Rays:</strong> Show how the glasses bend light *before* it reaches the eye.</p>
-                <p>When glasses are active, the purple rays show how the eye focuses the light that has *already been bent* by the glasses.</p>
+                <p><span class="color-box" style="background-color: #ff0000;"></span><strong>Red Rays:</strong> From object to the glasses lens.</p>
+                <p><span class="color-box" style="background-color: #008000;"></span><strong>Green Rays:</strong> From glasses to the eye lens.</p>
+                 <p><span class="color-box" style="background-color: #ff8000; border-style: dashed;"></span><strong>Orange Dashed:</strong> Virtual rays showing virtual image location.</p>
+                <p><span class="color-box" style="background-color: #0000ff;"></span><strong>Blue Rays:</strong> Final path from eye lens to the focused image.</p>
             </div>
         </div>
         <div class="canvas-area">

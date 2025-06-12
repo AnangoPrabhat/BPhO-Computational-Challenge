@@ -6,23 +6,18 @@
     <h2>Welcome!</h2>
     <p>Explore how vision works with our simulator or test your optometry skills in the Eye Test Game.</p>
 
-    <h3>Upload Custom Object Image (for Simulator)</h3>
-    <form method="POST" enctype="multipart/form-data" action="{{ url_for('index') }}">
-        <input type="file" name="image" accept="image/*" required>
-        <button type="submit">Upload Image</button>
-    </form>
+    <h3>Simulator Object Selection</h3>
+    <p>Choose the object you would like to see in the Vision Simulator.</p>
+    <div class="navigation-links">
+        <a href="{{ url_for('simulator', object='arrow') }}" class="button-navigation">Use Default Arrow</a>
+        <a href="{{ url_for('simulator', object='tower') }}" class="button-navigation">Use Tower of London</a>
+    </div>
+     <p><small>Note: To use the Tower of London, ensure you have an image named <code>tower_of_london.png</code> in the <code>static/images/</code> directory.</small></p>
 
-    {% if uploaded_image_display_path %}
-        <h4>Current Uploaded Object Image:</h4>
-        <img src="{{ uploaded_image_display_path }}" alt="Uploaded Object" style="max-width: {{ MAX_DIMENSION }}px; max-height: {{ MAX_DIMENSION }}px; border: 1px solid #ccc;">
-        <p><small>(This image will be used in the Vision Simulator)</small></p>
-    {% else %}
-        <p><small>(No custom image uploaded. The simulator will use a default object.)</small></p>
-    {% endif %}
+    <hr style="margin: 30px 0;">
 
-    <h3>Navigation</h3>
-    <ul>
-        <li><a href="{{ url_for('simulator') }}">Go to Vision Simulator</a></li>
-        <li><a href="{{ url_for('game_start') }}">Play Eye Test Game</a></li>
-    </ul>
+    <h3>Or, Play the Game</h3>
+    <div class="navigation-links">
+       <a href="{{ url_for('game_start') }}" class="button-start-game">Play Eye Test Game</a>
+    </div>
 {% endblock %}

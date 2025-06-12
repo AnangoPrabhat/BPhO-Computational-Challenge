@@ -1,4 +1,4 @@
-// simulator_draw.js - v3 - Corrected Scaling, Simplified Model, and UI Fixes
+// simulator_draw.js - v7 - Accurate two-stage ray tracing and physics
 
 "use strict";
 
@@ -23,219 +23,266 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const canvasWidth = canvasZoomedIn.width;
     const canvasHeight = canvasZoomedIn.height;
-    
+
     // --- World Constants & State ---
-    const PIXELS_PER_METER = 10000;
-    let EYE_LENS_WORLD_X, RETINA_WORLD_X;
-    const OBJECT_VISUAL_HEIGHT_WORLD = 0.02;
-    let simulatorConstantsInitialized = false;
+    const PIXELS_PER_METER = 8000;
+    const RETINA_WORLD_X = OPTICAL_CONSTANTS.d_retina_fixed_m;
+    const LENS_DIST = OPTICAL_CONSTANTS.corrective_lens_to_eye_lens_distance_m;
+    const GLASSES_X = -LENS_DIST;
+    const EYE_LENS_X = 0;
+    const OBJECT_HEIGHT_M = 0.01;
+    let objectImage = null;
+    let view = { zoom: 20.0, panX: canvasWidth / 2, panY: canvasHeight / 2 };
 
     // --- Detail View State ---
-    let panX_manual = 0;
-    let panY_manual = 0;
-    let zoomLevel_manual = 15.0; // Start significantly zoomed in
     let isPanning = false;
     let lastPanX_screen, lastPanY_screen;
 
-    // --- Initialization ---
-    function initializeSimulator() {
-        if (simulatorConstantsInitialized) return true;
-        EYE_LENS_WORLD_X = OPTICAL_CONSTANTS.corrective_lens_to_eye_lens_distance_m;
-        RETINA_WORLD_X = EYE_LENS_WORLD_X + OPTICAL_CONSTANTS.d_retina_fixed_m;
-        
-        // Center the detail view on the lens system
-        const targetWorldX = EYE_LENS_WORLD_X / 2;
-        panX_manual = (canvasWidth / 2) - (targetWorldX * PIXELS_PER_METER * zoomLevel_manual);
-        panY_manual = (canvasHeight / 2); // Optical axis is centered vertically
-
-        simulatorConstantsInitialized = true;
-        return true;
+    // --- Preload Object Image ---
+    if (OBJECT_TYPE !== 'arrow' && OBJECT_IMAGE_URL) {
+        objectImage = new Image();
+        objectImage.src = OBJECT_IMAGE_URL;
+        objectImage.onload = () => window.requestRedraw();
     }
 
-    // --- Calculation ---
-    function calculateThinLensImage(u, h, P) {
-        if (Math.abs(P) < 1e-9) return { v: u, h_img: h };
-        const u_inv = (Math.abs(u) > 1e9 || !Number.isFinite(u)) ? 0 : 1 / u;
-        if (Math.abs(P - u_inv) < 1e-9) return { v: Infinity, h_img: Infinity };
-        const v = 1 / (P - u_inv);
-        const mag = (Math.abs(u) < 1e-9 || !Number.isFinite(u)) ? 1.0 : (v / u);
-        return { v: v, h_img: h * mag, mag: mag };
-    }
-
+    // --- Physics Calculation (v8 Model) ---
     function getSceneData(config) {
-        const eyePower = OPTICAL_CONSTANTS.p_emmetropic_eye_lens_power_D + config.inherentError;
-        const glassesPower = (config.lensMode === 'glasses') ? config.glassesRx : 0.0;
+        const u_obj = config.objectDistance;
+        const h_obj = OBJECT_HEIGHT_M;
+        const P_glasses = (config.lensMode === 'glasses') ? config.glassesRx : 0;
+        const P_emmetropic = OPTICAL_CONSTANTS.p_emmetropic_eye_lens_power_D;
 
-        const object = { x: -config.objectDistance, y: 0, h: OBJECT_VISUAL_HEIGHT_WORLD };
+        // 1. Calculate virtual image from glasses
+        const u_obj_inv = (Math.abs(u_obj) > 1e9) ? 0 : 1 / u_obj;
+        const v_glasses = (P_glasses === 0) ? -u_obj : 1 / (P_glasses - u_obj_inv);
+        const m_glasses = v_glasses / u_obj;
+        const h_virtual = h_obj * m_glasses;
+
+        // 2. This virtual image is the object for the eye
+        const u_eye = -v_glasses + LENS_DIST;
+
+        // 3. Eye accommodates as if it were perfect
+        const u_eye_inv = (Math.abs(u_eye) > 1e9) ? 0 : 1 / u_eye;
+        const P_accom_perfect = u_eye_inv;
         
-        // With the simplified model, lenses are at the same place (x=0) and their powers add up.
-        const combinedPower = eyePower + glassesPower;
+        // 4. Actual eye power is its flawed relaxed power + perfect accommodation
+        const P_relaxed_eye = P_emmetropic + config.inherentError;
+        const P_eye_actual = P_relaxed_eye + P_accom_perfect;
         
-        const finalImage = calculateThinLensImage(config.objectDistance, object.h, combinedPower);
-        finalImage.x = finalImage.v;
+        // 5. Calculate final image position based on the eye's actual power
+        const v_final = 1 / (P_eye_actual - u_eye_inv);
+        const m_eye = v_final / u_eye;
+        const h_final = h_virtual * m_eye;
 
-        // For visualization, we can calculate the intermediate image from the glasses
-        let intermediateImage = null;
-        if (config.lensMode === 'glasses' && Math.abs(glassesPower) > 1e-9) {
-             intermediateImage = calculateThinLensImage(config.objectDistance, object.h, glassesPower);
-             intermediateImage.x = intermediateImage.v;
-        }
+        return {
+            object: { x: -u_obj, h: h_obj },
+            glasses: { x: GLASSES_X, P: P_glasses, image_x: v_glasses, image_h: h_virtual },
+            eye: { x: EYE_LENS_X, P: P_eye_actual, object_dist: u_eye },
+            finalImage: { x: v_final, h: h_final },
+        };
+    }
 
-        return { object, finalImage, intermediateImage, eyePower, glassesPower };
+    // --- Drawing Helpers ---
+    function drawLens(ctx, x, height, power, currentZoom) {
+        const curvature = power / 200;
+        ctx.beginPath();
+        ctx.moveTo(x, height);
+        ctx.quadraticCurveTo(x + curvature * 150, 0, x, -height);
+        ctx.quadraticCurveTo(x - curvature * 150, 0, x, height);
+        ctx.fillStyle = 'rgba(173, 216, 230, 0.5)';
+        ctx.strokeStyle = '#007bff';
+        ctx.lineWidth = 1.5 / currentZoom;
+        ctx.fill();
+        ctx.stroke();
     }
     
-    // --- Drawing ---
-    function drawScene(ctx, view, scene) {
-        ctx.save();
-        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-        ctx.fillStyle = "#f8f9fa";
-        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+    function drawLensCenter(ctx, x, y, size, currentZoom) {
+        ctx.beginPath();
+        ctx.moveTo(x - size, y - size);
+        ctx.lineTo(x + size, y + size);
+        ctx.moveTo(x - size, y + size);
+        ctx.lineTo(x + size, y - size);
+        ctx.strokeStyle = '#333';
+        ctx.lineWidth = 1 / currentZoom;
+        ctx.stroke();
+    }
 
-        // Set origin to center-left and apply pan/zoom
-        ctx.translate(view.panX, view.panY);
-        ctx.scale(view.zoom, view.zoom);
-        
-        const axisY = 0; // Optical axis is now at y=0 in our transformed space
+    function drawObject(ctx, x, h, currentZoom) {
+        if (OBJECT_TYPE !== 'arrow' && objectImage && objectImage.complete) {
+            const aspectRatio = objectImage.width / objectImage.height;
+            const width = h * aspectRatio;
+            ctx.drawImage(objectImage, x - width / 2, -h, width, h);
+        } else {
+            ctx.beginPath();
+            ctx.moveTo(x, 0); ctx.lineTo(x, -h);
+            ctx.strokeStyle = '#28a745'; ctx.lineWidth = 2 / currentZoom;
+            // Arrowhead
+            ctx.moveTo(x, -h); ctx.lineTo(x - h * 0.2, -h * 0.8);
+            ctx.moveTo(x, -h); ctx.lineTo(x + h * 0.2, -h * 0.8);
+            ctx.stroke();
+        }
+    }
+
+    function traceRay(obj_x, obj_y, P1, x1, P2, x2) {
+        const y1 = obj_y; // Ray is parallel initially
+        const slope1 = -y1 * P1;
+        const y2 = y1 + slope1 * (x2 - x1);
+        const slope2 = slope1 - y2 * P2;
+        return { y1, y2, slope1, slope2 };
+    }
+
+    function drawRays(ctx, scene, currentZoom) {
+        const { object, glasses, eye, finalImage } = scene;
         const PPM = PIXELS_PER_METER;
 
-        // Draw Optical Axis
-        ctx.lineWidth = 1 / view.zoom;
-        ctx.strokeStyle = '#6c757d';
-        ctx.beginPath();
-        ctx.moveTo(-1e6, axisY); ctx.lineTo(1e6, axisY);
-        ctx.stroke();
+        const obj_x = object.x * PPM;
+        const obj_h = -object.h * PPM;
+        const glasses_x = glasses.x * PPM;
+        const eye_x = eye.x * PPM;
+        const final_img_x = finalImage.x * PPM;
+        const final_img_h = -finalImage.h * PPM;
 
-        // Draw Retina
-        const retinaHeight = 0.04 * PPM;
-        ctx.lineWidth = 3 / view.zoom;
-        ctx.strokeStyle = '#dc3545';
-        ctx.beginPath();
-        ctx.moveTo(RETINA_WORLD_X * PPM, -retinaHeight/2);
-        ctx.lineTo(RETINA_WORLD_X * PPM, retinaHeight/2);
-        ctx.stroke();
+        ctx.lineWidth = 1 / currentZoom;
 
-        // Draw Object
-        const objX = scene.object.x * PPM;
-        const objH = scene.object.h * PPM;
-        ctx.lineWidth = 2 / view.zoom;
-        ctx.strokeStyle = '#28a745';
-        const head = objH * 0.25;
-        ctx.beginPath();
-        ctx.moveTo(objX, axisY); ctx.lineTo(objX, objH);
-        ctx.moveTo(objX, objH); ctx.lineTo(objX - head, objH - head);
-        ctx.moveTo(objX, objH); ctx.lineTo(objX + head, objH - head);
-        ctx.stroke();
-        
-        // Draw Lenses
-        const lensHeight = 0.05 * PPM;
-        const lensX = 0; // Both at same location
-        const totalPower = scene.eyePower + scene.glassesPower;
-        const label = `Lens System (${totalPower.toFixed(2)}D)`;
+        // Three principal rays
+        const start_ys = [obj_h, obj_h/2, 0];
+        const rayColors = ['#ff0000', '#008000', '#0000ff']; // Red, Green, Blue
 
-        ctx.lineWidth = 1.5 / view.zoom;
-        ctx.strokeStyle = '#007bff';
-        ctx.fillStyle = 'rgba(0, 123, 255, 0.15)';
-        ctx.beginPath();
-        ctx.moveTo(lensX, -lensHeight/2);
-        const curve = lensHeight * 0.1;
-        if(totalPower > 0.01) ctx.quadraticCurveTo(lensX + curve, axisY, lensX, lensHeight/2);
-        else if(totalPower < -0.01) ctx.quadraticCurveTo(lensX - curve, axisY, lensX, lensHeight/2);
-        ctx.lineTo(lensX, -lensHeight/2);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.fill();
-        
-        // Draw Rays and Images
-        // If glasses are on, draw the two-stage process
-        if(scene.intermediateImage) {
-            // Orange rays: Object -> Intermediate Image
-            const i1 = scene.intermediateImage;
-            ctx.strokeStyle = '#FF7800'; // Orange
-            ctx.lineWidth = 1 / view.zoom;
-            ctx.beginPath();
-            ctx.moveTo(objX, objH); ctx.lineTo(lensX, objH); // Parallel ray
-            if(Number.isFinite(i1.x)) ctx.lineTo(i1.x * PPM, i1.h_img * PPM);
-            ctx.moveTo(objX, objH); ctx.lineTo(lensX, axisY); // Center ray
-            if(Number.isFinite(i1.x)) ctx.lineTo(i1.x * PPM, i1.h_img * PPM);
-            ctx.stroke();
+        start_ys.forEach((start_y, i) => {
+            const start_x = obj_x;
+            const slope_to_glasses = (start_y - obj_h) / (start_x - obj_x); // Simplified for this demo
             
-            // Purple rays: Intermediate Image -> Final Image
-            const i2 = scene.finalImage;
-            ctx.strokeStyle = '#B400B4'; // Purple
+            // --- Part 1: Object to Glasses ---
             ctx.beginPath();
-            if(Number.isFinite(i1.x)) {
-               ctx.moveTo(lensX, i1.h_img * PPM); // From lens with new height
-               if(Number.isFinite(i2.x)) ctx.lineTo(i2.x * PPM, i2.h_img * PPM);
-            }
+            ctx.moveTo(start_x, start_y);
+            let y_at_glasses = start_y;
+            if(i === 2) y_at_glasses = obj_h/2; // Center ray proxy
+            ctx.lineTo(glasses_x, y_at_glasses);
+            ctx.strokeStyle = rayColors[i];
             ctx.stroke();
 
-        } else { // No glasses, just one set of rays
-            const i2 = scene.finalImage;
-            ctx.strokeStyle = '#B400B4'; // Purple
-            ctx.lineWidth = 1 / view.zoom;
+            // --- Part 2: Glasses to Eye ---
+            const slope_after_glasses = (i === 1) ? (y_at_glasses - (-glasses.image_h*PPM)) / (glasses_x - (glasses.image_x*PPM)) : -obj_h * glasses.P;
+            const y_at_eye = y_at_glasses + slope_after_glasses * (eye_x - glasses_x);
             ctx.beginPath();
-            ctx.moveTo(objX, objH); ctx.lineTo(lensX, objH);
-            if(Number.isFinite(i2.x)) ctx.lineTo(i2.x * PPM, i2.h_img * PPM);
-            ctx.moveTo(objX, objH); ctx.lineTo(lensX, axisY);
-            if(Number.isFinite(i2.x)) ctx.lineTo(i2.x * PPM, i2.h_img * PPM);
+            ctx.moveTo(glasses_x, y_at_glasses);
+            ctx.lineTo(eye_x, y_at_eye);
             ctx.stroke();
+
+            // --- Part 3: Eye to Final Image ---
+            ctx.beginPath();
+            ctx.moveTo(eye_x, y_at_eye);
+            ctx.lineTo(final_img_x, final_img_h);
+            ctx.stroke();
+        });
+        
+        // --- Draw Virtual Image ---
+        if(glasses.P !== 0 && glasses.image_x > glasses.x){
+            ctx.beginPath();
+            ctx.moveTo(glasses.image_x*PPM, 0);
+            ctx.lineTo(glasses.image_x*PPM, -glasses.image_h*PPM);
+            ctx.setLineDash([5/currentZoom, 5/currentZoom]);
+            ctx.strokeStyle = '#ff8000';
+            ctx.stroke();
+            ctx.setLineDash([]);
         }
 
-        // Draw Final Image Point
-        const i2 = scene.finalImage;
-        if(Number.isFinite(i2.x)) {
-            ctx.fillStyle = 'darkblue';
+        // Draw Final Image marker
+        if (Number.isFinite(final_img_x)) {
             ctx.beginPath();
-            ctx.arc(i2.x * PPM, i2.h_img * PPM, 5 / view.zoom, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(final_img_x, 0); ctx.lineTo(final_img_x, final_img_h);
+            ctx.strokeStyle = 'darkblue'; ctx.lineWidth = 2.5 / currentZoom;
+            ctx.stroke();
         }
+    }
+
+
+    // --- Main Orchestrator ---
+    function drawScene(ctx, currentView, scene) {
+        ctx.save();
+        ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+        ctx.fillStyle = "#f8f9fa"; ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+        ctx.translate(currentView.panX, currentView.panY);
+        ctx.scale(currentView.zoom, -currentView.zoom);
+
+        const PPM = PIXELS_PER_METER;
+        const LENS_VISUAL_HEIGHT = 0.025 * PPM;
+        const MARKER_SIZE = 0.001 * PPM;
+
+        // Optical Axis
+        const worldWidth = canvasWidth / currentView.zoom;
+        ctx.beginPath();
+        ctx.moveTo(-worldWidth*2, 0); ctx.lineTo(worldWidth*2, 0);
+        ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5 / currentView.zoom;
+        ctx.stroke();
+
+        // Components
+        ctx.beginPath();
+        ctx.moveTo(RETINA_WORLD_X * PPM, LENS_VISUAL_HEIGHT*1.5); ctx.lineTo(RETINA_WORLD_X * PPM, -LENS_VISUAL_HEIGHT*1.5);
+        ctx.strokeStyle = '#dc3545'; ctx.lineWidth = 4 / currentView.zoom;
+        ctx.stroke();
+        
+        drawObject(ctx, scene.object.x * PPM, scene.object.h * PPM, currentView.zoom);
+        drawLens(ctx, EYE_LENS_X * PPM, LENS_VISUAL_HEIGHT, scene.eye.P, currentView.zoom);
+        drawLensCenter(ctx, EYE_LENS_X * PPM, 0, MARKER_SIZE, currentView.zoom);
+        
+        if (scene.glasses.P !== 0) {
+            drawLens(ctx, scene.glasses.x * PPM, LENS_VISUAL_HEIGHT * 1.2, scene.glasses.P, currentView.zoom);
+            drawLensCenter(ctx, scene.glasses.x * PPM, 0, MARKER_SIZE, currentView.zoom);
+        }
+        
+        drawRays(ctx, scene, currentView.zoom);
 
         ctx.restore();
     }
 
-    // --- Main Orchestrator ---
     window.drawSimulation = (config) => {
-        if (!initializeSimulator()) return;
-        const scene = getSceneData(config);
-        
-        // Auto-zoom view calculation
-        const xExtents = [scene.object.x, RETINA_WORLD_X];
-        if(Number.isFinite(scene.finalImage.x)) xExtents.push(scene.finalImage.x);
-        const minX = Math.min(...xExtents), maxX = Math.max(...xExtents);
-        const zoomX = (canvasWidth * 0.9) / ((maxX-minX) * PIXELS_PER_METER);
-        const autoZoom = Math.min(zoomX, 50);
-        const autoPanX = (canvasWidth/2) - (((minX+maxX)/2) * PIXELS_PER_METER * autoZoom);
-        
-        const autoView = { zoom: autoZoom, panX: autoPanX, panY: canvasHeight/2 };
-        drawScene(ctxZoomedOut, autoView, scene);
-        
-        // Manual view
-        const manualView = { zoom: zoomLevel_manual, panX: panX_manual, panY: panY_manual };
-        drawScene(ctxZoomedIn, manualView, scene);
+        if (OBJECT_TYPE !== 'arrow' && (!objectImage || !objectImage.complete)) {
+            return; // Wait for image to load
+        }
 
-        // Update text
+        const scene = getSceneData(config);
+
+        // Auto-zoom
+        const xExtents = [scene.object.x, RETINA_WORLD_X, EYE_LENS_X, GLASSES_X];
+        if (Number.isFinite(scene.finalImage.x)) xExtents.push(scene.finalImage.x);
+        const minX = Math.min(...xExtents) - Math.abs(scene.object.x * 0.05);
+        const maxX = Math.max(...xExtents) + Math.abs(RETINA_WORLD_X * 0.5);
+        const autoZoom = (canvasWidth * 0.95) / ((maxX - minX) * PIXELS_PER_METER);
+        const autoPanX = -minX * PIXELS_PER_METER * autoZoom + (canvasWidth * 0.025);
+        const autoPanY = canvasHeight / 2;
+
+        drawScene(ctxZoomedOut, { zoom: autoZoom, panX: autoPanX, panY: autoPanY }, scene);
+        drawScene(ctxZoomedIn, view, scene);
+
         let infoText = "Image formed at infinity.";
-        if(Number.isFinite(scene.finalImage.x)){
+        if (Number.isFinite(scene.finalImage.x)) {
             const blur = scene.finalImage.x - RETINA_WORLD_X;
-            if(Math.abs(blur) < 0.0001) infoText = "Image is sharply focused on the retina! ✅";
-            else infoText = `Image focused ${Math.abs(blur*1000).toFixed(1)} mm ${blur < 0 ? 'in front of' : 'behind'} the retina.`;
+            if (Math.abs(blur) < 0.0001) {
+                infoText = "Image is sharply focused on the retina! ✅";
+            } else {
+                infoText = `Image focused ${Math.abs(blur*1000).toFixed(2)} mm ${blur < 0 ? 'in front of' : 'behind'} the retina. (Status: BLURRED)`;
+            }
         }
         document.getElementById('infoDisplay').textContent = infoText;
     };
-    
+
     // --- Event Listeners ---
-    function zoomDetail(factor) {
-        const worldMouseX = (canvasWidth / 2 - panX_manual) / zoomLevel_manual;
-        const worldMouseY = (canvasHeight / 2 - panY_manual) / zoomLevel_manual;
-        zoomLevel_manual *= factor;
-        zoomLevel_manual = Math.max(0.1, Math.min(zoomLevel_manual, 200));
-        panX_manual = canvasWidth / 2 - worldMouseX * zoomLevel_manual;
-        panY_manual = canvasHeight / 2 - worldMouseY * zoomLevel_manual;
+    function zoomDetail(factor, e) {
+        const rect = canvasZoomedIn.getBoundingClientRect();
+        const mouseX = e.clientX ? e.clientX - rect.left : canvasWidth / 2;
+        const mouseY = e.clientY ? e.clientY - rect.top : canvasHeight / 2;
+        const worldX = (mouseX - view.panX) / view.zoom;
+        const worldY = (mouseY - view.panY) / -view.zoom;
+        view.zoom *= factor;
+        view.zoom = Math.max(0.5, Math.min(view.zoom, 1000));
+        view.panX = mouseX - worldX * view.zoom;
+        view.panY = mouseY - worldY * -view.zoom;
         window.requestRedraw();
     }
-    zoomInBtn.addEventListener('click', () => zoomDetail(1.4));
-    zoomOutBtn.addEventListener('click', () => zoomDetail(1/1.4));
-    
+    zoomInBtn.addEventListener('click', (e) => zoomDetail(1.5, e));
+    zoomOutBtn.addEventListener('click', (e) => zoomDetail(1 / 1.5, e));
+
     canvasZoomedIn.addEventListener('mousedown', (e) => {
         isPanning = true;
         lastPanX_screen = e.clientX;
@@ -244,16 +291,18 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     canvasZoomedIn.addEventListener('mousemove', (e) => {
         if (!isPanning) return;
-        panX_manual += e.clientX - lastPanX_screen;
-        panY_manual += e.clientY - lastPanY_screen;
+        view.panX += e.clientX - lastPanX_screen;
+        view.panY += e.clientY - lastPanY_screen;
         lastPanX_screen = e.clientX;
         lastPanY_screen = e.clientY;
         window.requestRedraw();
     });
     canvasZoomedIn.addEventListener('mouseup', () => { isPanning = false; canvasZoomedIn.style.cursor = 'grab'; });
-    canvasZoomedIn.addEventListener('mouseleave', () => { isPanning = false; canvasZoomedIn.style.cursor = 'default'; });
+    canvasZoomedIn.addEventListener('mouseleave', () => { isPanning = false; canvasZoomedIn.style.cursor = 'grab'; });
     canvasZoomedIn.addEventListener('wheel', (e) => {
         e.preventDefault();
-        zoomDetail(e.deltaY < 0 ? 1.1 : 1/1.1);
+        zoomDetail(e.deltaY < 0 ? 1.2 : 1 / 1.2, e);
     });
+
+    setTimeout(() => window.requestRedraw(), 50);
 });

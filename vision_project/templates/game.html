@@ -4,29 +4,55 @@
 
 {% block head_extra %}
     <script>
-        const GAME_CONSTANTS = JSON.parse('{{ game_constants | tojson | safe }}');
         const INITIAL_GAME_DURATION = {{ game_duration }};
+        const OPTICAL_CONSTANTS = {
+            d_retina_fixed_m: {{ 0.017 }},
+            p_emmetropic_eye_lens_power_D: {{ 1 / 0.017 }},
+            game_object_distance_m: {{ 6.0 }},
+            corrective_lens_to_eye_lens_distance_m: {{ 0.015 }}
+        };
     </script>
+    <style>
+        #spoilerSection {
+            margin-top: 20px;
+            padding: 15px;
+            border: 1px dashed #ccc;
+            border-radius: 5px;
+            display: none; /* Hidden by default */
+        }
+        .spoiler-diagram-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+         .spoiler-diagram-container div {
+            text-align: center;
+        }
+        .spoiler-diagram-container canvas {
+             border: 1px solid #adb5bd;
+             background-color: #f0f4f8;
+        }
+    </style>
 {% endblock %}
 
 {% block content %}
-    <h2>Eye Test Game 🧐</h2>
+    <h2>Eye Test Game</h2>
     <div class="game-container">
         <div id="gameStartScreen">
             <p class="patient-intro">A new patient has arrived. They say: <br><em>"{{ patient_statement }}"</em></p>
-            <p>Your goal is to determine the corrective lens prescription they need. You have <strong>{{ game_duration // 60 }} minutes</strong>.</p>
+            <p>Your goal is to determine the corrective lens prescription they need. You have <strong>{{ game_duration }} seconds</strong>.</p>
             <p>Remember the sign convention:
                 <ul>
-                    <li><strong>Myopia (short-sightedness)</strong>: The eye's focusing power is too strong, so light focuses <em>in front</em> of the retina. This is represented by a <strong>positive (+) eye error</strong> (e.g., +2.0 D) and requires a <strong>negative (-) corrective lens</strong>.</li>
-                    <li><strong>Hyperopia (long-sightedness)</strong>: The eye's focusing power is too weak, so light focuses <em>behind</em> the retina. This is represented by a <strong>negative (-) eye error</strong> (e.g., -2.0 D) and requires a <strong>positive (+) corrective lens</strong>.</li>
-                    <li>The corrective lens power you prescribe should aim to counteract the patient's eye error.</li>
+                    <li><strong>Myopia (short-sightedness)</strong>: The eye's focusing power is too strong. This is a <strong>positive (+) eye error</strong> and requires a <strong>negative (-) corrective lens</strong>.</li>
+                    <li><strong>Hyperopia (long-sightedness)</strong>: The eye's focusing power is too weak. This is a <strong>negative (-) eye error</strong> and requires a <strong>positive (+) corrective lens</strong>.</li>
                 </ul>
             </p>
             <button id="startGameBtn" class="button-start-game">Begin Eye Test!</button>
         </div>
 
         <div id="gameplayScreen" style="display: none;">
-            <div id="timerDisplay">Time Remaining: {{ "%02d:%02d" | format(game_duration // 60, game_duration % 60) }}</div>
+            <div id="timerDisplay">Time Remaining: 00:{{ "%02d" | format(game_duration) }}</div>
             
             <div class="game-controls">
                 <p>Offer two test lenses to the patient. They will tell you which one makes their vision less blurry.</p>
@@ -42,6 +68,24 @@
             </div>
 
             <div id="patientFeedback" class="info-box">Patient says: ...</div>
+
+            <button id="toggleSpoilerBtn" class="button-secondary" style="margin-top: 10px; display: none;">Show/Hide Diagnostic Diagram</button>
+            <div id="spoilerSection">
+                <h4>Diagnostic Ray Diagrams</h4>
+                <p>These diagrams show how each test lens focuses light relative to the patient's actual retina.</p>
+                <div class="spoiler-diagram-container">
+                    <div>
+                        <p id="lens1Info">Lens 1</p>
+                        <canvas id="gameRayCanvas1" width="400" height="200"></canvas>
+                        <p id="lens1FocusInfo"></p>
+                    </div>
+                    <div>
+                         <p id="lens2Info">Lens 2</p>
+                        <canvas id="gameRayCanvas2" width="400" height="200"></canvas>
+                         <p id="lens2FocusInfo"></p>
+                    </div>
+                </div>
+            </div>
             
             <div class="final-guess-area" id="finalGuessSection" style="display: none;">
                 <hr>
@@ -62,22 +106,11 @@
                 <button onclick="window.location.href='{{url_for('game_start')}}'" class="button-primary">Play Again?</button>
             </div>
 
-            <div class="spoiler-section">
-                <button id="toggleSpoilerBlurBtn" class="button-secondary">Toggle Spoiler: Check Blur Values</button>
-                <div id="spoilerBlurContainer" style="display:none;" class="info-box">
-                    <p><small>This tool calculates the theoretical blurriness for the patient's eye with a given test lens. Lower values are better.</small></p>
-                    <div class="control-group">
-                        <label for="spoilerTestLensPower">Test Lens Power (D): </label>
-                        <input type="number" id="spoilerTestLensPower" step="0.25" value="0.00">
-                        <button id="getSpoilerBlurBtn" class="button-action">Get Blur Value</button>
-                    </div>
-                    <p id="spoilerBlurResult" class="info-text-small">Blurriness: N/A</p>
-                </div>
-            </div>
         </div>
     </div>
 {% endblock %}
 
 {% block scripts_extra %}
+    <script src="{{ url_for('static', filename='js/game_diagram.js') }}"></script>
     <script src="{{ url_for('static', filename='js/game_logic.js') }}"></script>
 {% endblock %}
