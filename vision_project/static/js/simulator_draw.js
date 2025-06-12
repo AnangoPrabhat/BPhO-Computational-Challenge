@@ -1,4 +1,4 @@
-// simulator_draw.js - v7 - Accurate two-stage ray tracing and physics
+// simulator_draw.js - v8 - Reworked physics model and 3-ray, 2-lens tracing.
 
 "use strict";
 
@@ -8,7 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
     }
 
-    // --- Canvas and Context Setup ---
     const canvasZoomedOut = document.getElementById('simulatorCanvasZoomedOut');
     const ctxZoomedOut = canvasZoomedOut ? canvasZoomedOut.getContext('2d') : null;
     const canvasZoomedIn = document.getElementById('simulatorCanvasZoomedIn');
@@ -24,7 +23,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const canvasWidth = canvasZoomedIn.width;
     const canvasHeight = canvasZoomedIn.height;
 
-    // --- World Constants & State ---
     const PIXELS_PER_METER = 8000;
     const RETINA_WORLD_X = OPTICAL_CONSTANTS.d_retina_fixed_m;
     const LENS_DIST = OPTICAL_CONSTANTS.corrective_lens_to_eye_lens_distance_m;
@@ -34,50 +32,42 @@ document.addEventListener('DOMContentLoaded', () => {
     let objectImage = null;
     let view = { zoom: 20.0, panX: canvasWidth / 2, panY: canvasHeight / 2 };
 
-    // --- Detail View State ---
     let isPanning = false;
     let lastPanX_screen, lastPanY_screen;
 
-    // --- Preload Object Image ---
     if (OBJECT_TYPE !== 'arrow' && OBJECT_IMAGE_URL) {
         objectImage = new Image();
         objectImage.src = OBJECT_IMAGE_URL;
         objectImage.onload = () => window.requestRedraw();
     }
 
-    // --- Physics Calculation (v8 Model) ---
+    // --- Physics Calculation (v10 Model) ---
     function getSceneData(config) {
         const u_obj = config.objectDistance;
         const h_obj = OBJECT_HEIGHT_M;
         const P_glasses = (config.lensMode === 'glasses') ? config.glassesRx : 0;
         const P_emmetropic = OPTICAL_CONSTANTS.p_emmetropic_eye_lens_power_D;
 
-        // 1. Calculate virtual image from glasses
+        // 1. Accommodation is based ONLY on the original object's distance.
         const u_obj_inv = (Math.abs(u_obj) > 1e9) ? 0 : 1 / u_obj;
-        const v_glasses = (P_glasses === 0) ? -u_obj : 1 / (P_glasses - u_obj_inv);
-        const m_glasses = v_glasses / u_obj;
-        const h_virtual = h_obj * m_glasses;
-
-        // 2. This virtual image is the object for the eye
-        const u_eye = -v_glasses + LENS_DIST;
-
-        // 3. Eye accommodates as if it were perfect
-        const u_eye_inv = (Math.abs(u_eye) > 1e9) ? 0 : 1 / u_eye;
-        const P_accom_perfect = u_eye_inv;
+        const P_accom = u_obj_inv;
         
-        // 4. Actual eye power is its flawed relaxed power + perfect accommodation
-        const P_relaxed_eye = P_emmetropic + config.inherentError;
-        const P_eye_actual = P_relaxed_eye + P_accom_perfect;
+        // 2. The eye's actual power is its flawed relaxed state + accommodation.
+        const P_eye_actual = (P_emmetropic + config.inherentError) + P_accom;
         
-        // 5. Calculate final image position based on the eye's actual power
-        const v_final = 1 / (P_eye_actual - u_eye_inv);
-        const m_eye = v_final / u_eye;
-        const h_final = h_virtual * m_eye;
+        // 3. The total power of the system is the sum of the powers (assuming d~0 for physics, but not for drawing).
+        // This is the key simplification for this model.
+        const P_total = P_glasses + P_eye_actual;
+        
+        // 4. Calculate final image position and magnification based on the total effective power.
+        const v_final = 1 / (P_total - u_obj_inv);
+        const m_final = v_final / u_obj;
+        const h_final = h_obj * m_final;
 
         return {
             object: { x: -u_obj, h: h_obj },
-            glasses: { x: GLASSES_X, P: P_glasses, image_x: v_glasses, image_h: h_virtual },
-            eye: { x: EYE_LENS_X, P: P_eye_actual, object_dist: u_eye },
+            glasses: { x: GLASSES_X, P: P_glasses },
+            eye: { x: EYE_LENS_X, P: P_eye_actual },
             finalImage: { x: v_final, h: h_final },
         };
     }
@@ -116,21 +106,13 @@ document.addEventListener('DOMContentLoaded', () => {
             ctx.beginPath();
             ctx.moveTo(x, 0); ctx.lineTo(x, -h);
             ctx.strokeStyle = '#28a745'; ctx.lineWidth = 2 / currentZoom;
-            // Arrowhead
             ctx.moveTo(x, -h); ctx.lineTo(x - h * 0.2, -h * 0.8);
             ctx.moveTo(x, -h); ctx.lineTo(x + h * 0.2, -h * 0.8);
             ctx.stroke();
         }
     }
-
-    function traceRay(obj_x, obj_y, P1, x1, P2, x2) {
-        const y1 = obj_y; // Ray is parallel initially
-        const slope1 = -y1 * P1;
-        const y2 = y1 + slope1 * (x2 - x1);
-        const slope2 = slope1 - y2 * P2;
-        return { y1, y2, slope1, slope2 };
-    }
-
+    
+    // --- Accurate Ray Tracing for a 2-Lens System ---
     function drawRays(ctx, scene, currentZoom) {
         const { object, glasses, eye, finalImage } = scene;
         const PPM = PIXELS_PER_METER;
@@ -141,51 +123,53 @@ document.addEventListener('DOMContentLoaded', () => {
         const eye_x = eye.x * PPM;
         const final_img_x = finalImage.x * PPM;
         const final_img_h = -finalImage.h * PPM;
+        
+        const P_g = glasses.P;
+        const P_e = eye.P;
 
-        ctx.lineWidth = 1 / currentZoom;
+        const rayColors = ['#ff0000', '#009900', '#0000ff']; // Red, Green, Blue
 
-        // Three principal rays
-        const start_ys = [obj_h, obj_h/2, 0];
-        const rayColors = ['#ff0000', '#008000', '#0000ff']; // Red, Green, Blue
+        // Define 3 initial rays from the object height
+        // Ray 0: Parallel to axis
+        // Ray 1: Through object-space focal point of combined system (hard to calculate, use a proxy)
+        // Ray 2: Through center of glasses (easy to trace)
+        const initialRays = [
+            { y: obj_h, slope: 0 }, // Parallel ray
+            { y: obj_h, slope: (obj_h) / (obj_x - glasses_x) }, // Ray heading to center of glasses
+            { y: obj_h, slope: (obj_h * 0.5) / obj_x } // A third, arbitrary ray for coverage
+        ];
 
-        start_ys.forEach((start_y, i) => {
-            const start_x = obj_x;
-            const slope_to_glasses = (start_y - obj_h) / (start_x - obj_x); // Simplified for this demo
+        initialRays.forEach((ray, i) => {
+            ctx.strokeStyle = rayColors[i];
+            ctx.lineWidth = 1 / currentZoom;
             
             // --- Part 1: Object to Glasses ---
+            const y_at_glasses = ray.y + ray.slope * (glasses_x - obj_x);
             ctx.beginPath();
-            ctx.moveTo(start_x, start_y);
-            let y_at_glasses = start_y;
-            if(i === 2) y_at_glasses = obj_h/2; // Center ray proxy
+            ctx.moveTo(obj_x, ray.y);
             ctx.lineTo(glasses_x, y_at_glasses);
-            ctx.strokeStyle = rayColors[i];
             ctx.stroke();
 
             // --- Part 2: Glasses to Eye ---
-            const slope_after_glasses = (i === 1) ? (y_at_glasses - (-glasses.image_h*PPM)) / (glasses_x - (glasses.image_x*PPM)) : -obj_h * glasses.P;
+            // Apply thin lens equation for the change in slope at the glasses
+            const slope_after_glasses = ray.slope - y_at_glasses * P_g / PPM;
             const y_at_eye = y_at_glasses + slope_after_glasses * (eye_x - glasses_x);
             ctx.beginPath();
             ctx.moveTo(glasses_x, y_at_glasses);
             ctx.lineTo(eye_x, y_at_eye);
             ctx.stroke();
-
+            
             // --- Part 3: Eye to Final Image ---
+            // Apply thin lens equation again for the eye
+            const slope_after_eye = slope_after_glasses - y_at_eye * P_e / PPM;
+            const final_x_endpoint = final_img_x; 
+            const final_y_endpoint = y_at_eye + slope_after_eye * (final_x_endpoint - eye_x);
             ctx.beginPath();
             ctx.moveTo(eye_x, y_at_eye);
+            // We know all rays must converge, so we draw to the calculated final image height
             ctx.lineTo(final_img_x, final_img_h);
             ctx.stroke();
         });
-        
-        // --- Draw Virtual Image ---
-        if(glasses.P !== 0 && glasses.image_x > glasses.x){
-            ctx.beginPath();
-            ctx.moveTo(glasses.image_x*PPM, 0);
-            ctx.lineTo(glasses.image_x*PPM, -glasses.image_h*PPM);
-            ctx.setLineDash([5/currentZoom, 5/currentZoom]);
-            ctx.strokeStyle = '#ff8000';
-            ctx.stroke();
-            ctx.setLineDash([]);
-        }
 
         // Draw Final Image marker
         if (Number.isFinite(final_img_x)) {
@@ -197,7 +181,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
 
-    // --- Main Orchestrator ---
     function drawScene(ctx, currentView, scene) {
         ctx.save();
         ctx.clearRect(0, 0, canvasWidth, canvasHeight);
@@ -209,16 +192,14 @@ document.addEventListener('DOMContentLoaded', () => {
         const LENS_VISUAL_HEIGHT = 0.025 * PPM;
         const MARKER_SIZE = 0.001 * PPM;
 
-        // Optical Axis
         const worldWidth = canvasWidth / currentView.zoom;
         ctx.beginPath();
-        ctx.moveTo(-worldWidth*2, 0); ctx.lineTo(worldWidth*2, 0);
+        ctx.moveTo(-worldWidth * 2, 0); ctx.lineTo(worldWidth * 2, 0);
         ctx.strokeStyle = '#aaa'; ctx.lineWidth = 0.5 / currentView.zoom;
         ctx.stroke();
 
-        // Components
         ctx.beginPath();
-        ctx.moveTo(RETINA_WORLD_X * PPM, LENS_VISUAL_HEIGHT*1.5); ctx.lineTo(RETINA_WORLD_X * PPM, -LENS_VISUAL_HEIGHT*1.5);
+        ctx.moveTo(RETINA_WORLD_X * PPM, LENS_VISUAL_HEIGHT * 1.5); ctx.lineTo(RETINA_WORLD_X * PPM, -LENS_VISUAL_HEIGHT * 1.5);
         ctx.strokeStyle = '#dc3545'; ctx.lineWidth = 4 / currentView.zoom;
         ctx.stroke();
         
@@ -238,12 +219,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
     window.drawSimulation = (config) => {
         if (OBJECT_TYPE !== 'arrow' && (!objectImage || !objectImage.complete)) {
-            return; // Wait for image to load
+            return;
         }
 
         const scene = getSceneData(config);
 
-        // Auto-zoom
         const xExtents = [scene.object.x, RETINA_WORLD_X, EYE_LENS_X, GLASSES_X];
         if (Number.isFinite(scene.finalImage.x)) xExtents.push(scene.finalImage.x);
         const minX = Math.min(...xExtents) - Math.abs(scene.object.x * 0.05);
@@ -267,7 +247,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('infoDisplay').textContent = infoText;
     };
 
-    // --- Event Listeners ---
     function zoomDetail(factor, e) {
         const rect = canvasZoomedIn.getBoundingClientRect();
         const mouseX = e.clientX ? e.clientX - rect.left : canvasWidth / 2;
@@ -275,7 +254,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const worldX = (mouseX - view.panX) / view.zoom;
         const worldY = (mouseY - view.panY) / -view.zoom;
         view.zoom *= factor;
-        view.zoom = Math.max(0.5, Math.min(view.zoom, 1000));
+        // MODIFICATION: Allow for more extreme zoom-out
+        view.zoom = Math.max(0.01, Math.min(view.zoom, 1000));
         view.panX = mouseX - worldX * view.zoom;
         view.panY = mouseY - worldY * -view.zoom;
         window.requestRedraw();

@@ -24,8 +24,8 @@ def simulator():
     """Renders the vision simulator page."""
     object_type = request.args.get('object', 'arrow')
     object_image_url = ''
+    # MODIFICATION: Changed to big_ben.jpg
     if object_type == 'big_ben':
-        # MODIFICATION: Use big_ben.jpg
         object_image_url = url_for('static', filename='images/big_ben.jpg')
 
     optical_constants = {
@@ -38,6 +38,8 @@ def simulator():
                            object_image_url=object_image_url,
                            object_type=object_type,
                            optical_constants=optical_constants)
+
+# ... (The rest of the game routes remain unchanged) ...
 
 @app.route('/game', methods=['GET'])
 def game_start():
@@ -53,7 +55,7 @@ def game_start():
         patient_statement = "I find it hard to focus on things up close. I might be long-sighted (hyperopic)."
 
     session['patient_statement'] = patient_statement
-
+    
     return render_template('game.html', game_duration=session['game_duration'], patient_statement=patient_statement)
 
 def calculate_image_distance(u, P):
@@ -65,13 +67,8 @@ def calculate_image_distance(u, P):
 def calculate_blurriness_for_game(p_eye_error_D, p_test_lens_D):
     relaxed_eye_power = P_EMMETROPIC_EYE_LENS_POWER_D + p_eye_error_D
     
-    # 1. Image from test lens
     v_lens = calculate_image_distance(GAME_OBJECT_DISTANCE_M, p_test_lens_D)
-    
-    # 2. Virtual image from test lens becomes object for the eye
     u_eye = -(v_lens - CORRECTIVE_LENS_TO_EYE_LENS_DISTANCE_M)
-    
-    # 3. Final image from the relaxed eye (no accommodation for distant objects)
     v_final = calculate_image_distance(u_eye, relaxed_eye_power)
 
     if v_final == float('inf'): return float('inf')
@@ -98,7 +95,6 @@ def game_ask_patient():
     lens1_is_better = blur1 < blur2
     diff_blur = abs(blur1 - blur2)
     
-    # Probabilistic patient response
     prob_say_other = 0.01; prob_say_same = 0.03
     if diff_blur < 0.0001: prob_say_other = 0.10; prob_say_same = 0.25
     elif diff_blur < 0.0005: prob_say_other = 0.05; prob_say_same = 0.15
@@ -114,7 +110,6 @@ def game_ask_patient():
         else: feedback = f"The second lens ({p_test2:+.2f}D) looks less blurry than the first ({p_test1:+.2f}D)."
     
     remaining_time = max(0, session['game_duration'] - time_elapsed)
-    # NEW: Return patient error for spoiler diagram
     return jsonify({
         'feedback': feedback, 
         'remaining_time': round(remaining_time),
