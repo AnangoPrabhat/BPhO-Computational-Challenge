@@ -139,12 +139,4 @@ def game_submit_guess():
     for key in ['p_patient_actual_error', 'game_start_time']: session.pop(key, None)
     return jsonify(results)
 
-import os
 
-if __name__ == '__main__':
-    # Get the port from the environment variable Railway provides
-    try:
-        port = int(os.environ.get("PORT", 5000))
-    except:
-        port = 5000
-    app.run(host='0.0.0.0', port=port, debug=True)
