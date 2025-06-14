@@ -30,7 +30,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const EYE_LENS_X = 0;
     const OBJECT_HEIGHT_M = 0.01;
     let objectImage = null;
-    let view = { zoom: 20.0, panX: canvasWidth / 2, panY: canvasHeight / 2 };
+    let view = { zoom: 2.5, panX: canvasWidth / 2, panY: canvasHeight / 2 };
 
     let isPanning = false;
     let lastPanX_screen, lastPanY_screen;

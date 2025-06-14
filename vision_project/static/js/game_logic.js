@@ -28,9 +28,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const lens1FocusInfo = document.getElementById('lens1FocusInfo');
     const lens2FocusInfo = document.getElementById('lens2FocusInfo');
 
+    // Detail View Elements
+    const detailCanvas = document.getElementById('gameRayCanvasDetail');
+    const detailCtx = detailCanvas.getContext('2d');
+    const detailViewRadios = document.querySelectorAll('input[name="detailViewSelect"]');
+    const gameZoomInBtn = document.getElementById('gameZoomInBtn');
+    const gameZoomOutBtn = document.getElementById('gameZoomOutBtn');
+
 
     let timerInterval;
     let timeLeft = INITIAL_GAME_DURATION;
+    let detailView = { zoom: 200, panX: detailCanvas.width / 2, panY: detailCanvas.height / 2 };
+    let lastPatientError = null;
+    let isPanning = false;
+    let lastPanX, lastPanY;
+
 
     // --- Game Flow ---
     startGameBtn.addEventListener('click', () => {
@@ -70,6 +82,21 @@ document.addEventListener('DOMContentLoaded', () => {
         finalGuessSection.style.display = 'block';
     }
 
+    // --- Detail View Drawing ---
+    function requestDetailViewRedraw() {
+        if (!lastPatientError) return;
+
+        const selectedLens = document.querySelector('input[name="detailViewSelect"]:checked').value;
+        const lensPower = (selectedLens === '1') ? parseFloatSafe(lens1PowerInput.value) : parseFloatSafe(lens2PowerInput.value);
+
+        const scene = getSceneDataForGame({
+            patient_error_D: lastPatientError,
+            test_lens_D: lensPower
+        });
+        drawGameScene(detailCtx, scene, detailView);
+    }
+
+
     // --- Event Listeners ---
     askPatientBtn.addEventListener('click', async () => {
         askPatientBtn.disabled = true;
@@ -92,8 +119,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             patientFeedbackDiv.innerHTML = `<strong>Patient says:</strong> ${data.feedback || data.error || 'Unknown response'}`;
             
-            // NEW: If we get the patient error, draw the spoiler diagrams
             if (data.patient_error_D !== undefined && typeof drawGameSpoilerDiagrams === 'function') {
+                lastPatientError = data.patient_error_D;
                 toggleSpoilerBtn.style.display = 'inline-block';
                 const configs = [
                     { patient_error_D: data.patient_error_D, test_lens_D: lens1 },
@@ -104,6 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 lens2Info.textContent = `Lens 2 (${lens2.toFixed(2)} D)`;
                 lens1FocusInfo.textContent = results[0].infoText;
                 lens2FocusInfo.textContent = results[1].infoText;
+                requestDetailViewRedraw();
             }
 
             if (data.remaining_time !== undefined && data.remaining_time <= 0 && timeLeft > 0) {
@@ -139,11 +167,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 finalGuessSection.style.display = 'none';
                 setControlsState(true);
             } else {
-                patientFeedbackDiv.textContent = `Error submitting: ${results.error || 'Unknown error.'}`;
+                if(timeLeft <= 0) {
+                    patientFeedbackDiv.textContent = "Time's up! Your guess was not submitted in time.";
+                } else {
+                    patientFeedbackDiv.textContent = `Error submitting: ${results.error || 'Unknown error.'}`;
+                }
                 if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
             }
         } catch (error) {
-            patientFeedbackDiv.textContent = `Network error: ${error.message}`;
+            if(timeLeft <= 0) {
+                 patientFeedbackDiv.textContent = "Time's up!";
+            } else {
+                 patientFeedbackDiv.textContent = `Network error: ${error.message}`;
+            }
             if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
         }
     });
@@ -151,4 +187,49 @@ document.addEventListener('DOMContentLoaded', () => {
     toggleSpoilerBtn.addEventListener('click', () => {
         spoilerSection.style.display = (spoilerSection.style.display === 'none') ? 'block' : 'none';
     });
-});
+
+
+    // --- Detail View Listeners ---
+    detailViewRadios.forEach(radio => radio.addEventListener('change', requestDetailViewRedraw));
+
+    function zoomDetailView(factor, e) {
+        const rect = detailCanvas.getBoundingClientRect();
+        const mouseX = e.clientX ? e.clientX - rect.left : detailCanvas.width / 2;
+        const mouseY = e.clientY ? e.clientY - rect.top : detailCanvas.height / 2;
+        
+        const worldX = (mouseX - detailView.panX) / detailView.zoom;
+        const worldY = (mouseY - detailView.panY) / -detailView.zoom;
+
+        detailView.zoom *= factor;
+        detailView.panX = mouseX - worldX * detailView.zoom;
+        detailView.panY = mouseY - worldY * -detailView.zoom;
+        requestDetailViewRedraw();
+    }
+
+    gameZoomInBtn.addEventListener('click', (e) => zoomDetailView(1.5, e));
+    gameZoomOutBtn.addEventListener('click', (e) => zoomDetailView(1 / 1.5, e));
+
+    detailCanvas.addEventListener('mousedown', (e) => {
+        isPanning = true;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        detailCanvas.style.cursor = 'grabbing';
+    });
+
+    detailCanvas.addEventListener('mousemove', (e) => {
+        if (!isPanning) return;
+        detailView.panX += e.clientX - lastPanX;
+        detailView.panY += e.clientY - lastPanY;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        requestDetailViewRedraw();
+    });
+
+    detailCanvas.addEventListener('mouseup', () => { isPanning = false; detailCanvas.style.cursor = 'grab';});
+    detailCanvas.addEventListener('mouseleave', () => { isPanning = false; detailCanvas.style.cursor = 'grab';});
+    
+    detailCanvas.addEventListener('wheel', (e) => {
+        e.preventDefault();
+        zoomDetailView(e.deltaY < 0 ? 1.2 : 1 / 1.2, e);
+    });
+});     
