@@ -4,6 +4,7 @@
 
 document.addEventListener('DOMContentLoaded', () => {
     const inherentErrorInput = document.getElementById('inherentError');
+    const glassesRxInput = document.getElementById('glassesRx');
 
     // This is the single entry point for updating the simulation
     window.requestRedraw = () => {
@@ -16,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
             inherentError: parseFloatSafe(inherentErrorInput.value),
             objectDistance: parseFloat(document.getElementById('objectDistance').value) || 1,
             lensMode: document.querySelector('input[name="lensMode"]:checked').value,
-            glassesRx: parseFloat(document.getElementById('glassesRx').value) || 0
+            glassesRx: parseFloat(glassesRxInput.value) || 0
         };
         
         window.drawSimulation(config);
@@ -36,6 +37,27 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         inherentErrorInput.value = value;
         window.requestRedraw();
+
+        
+
+        
+    });
+
+    glassesRxInput.addEventListener('change', () => {
+        let value = parseFloatSafe(glassesRxInput.value);
+        const min = -40;
+        const max = 40;
+        if (value < min) {
+            value = min;
+        } else if (value > max) {
+            value = max;
+        }
+        glassesRxInput.value = value;
+        window.requestRedraw();
+
+        
+
+        
     });
 
     // Controls that trigger a redraw
@@ -56,7 +78,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     
     // Enable/disable glasses Rx input based on mode
-    const glassesRxInput = document.getElementById('glassesRx');
     document.querySelectorAll('input[name="lensMode"]').forEach(radio => {
         radio.addEventListener('change', () => {
             if (glassesRxInput) {
