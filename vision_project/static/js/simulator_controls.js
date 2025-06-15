@@ -5,6 +5,7 @@
 document.addEventListener('DOMContentLoaded', () => {
     const inherentErrorInput = document.getElementById('inherentError');
     const glassesRxInput = document.getElementById('glassesRx');
+    const glassesRxButton = document.querySelector('button[data-target="glassesRx"]');
 
     // This is the single entry point for updating the simulation
     window.requestRedraw = () => {
@@ -37,10 +38,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         inherentErrorInput.value = value;
         window.requestRedraw();
-
-        
-
-        
     });
 
     glassesRxInput.addEventListener('change', () => {
@@ -54,10 +51,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         glassesRxInput.value = value;
         window.requestRedraw();
-
-        
-
-        
     });
 
     // Controls that trigger a redraw
@@ -80,10 +73,27 @@ document.addEventListener('DOMContentLoaded', () => {
     // Enable/disable glasses Rx input based on mode
     document.querySelectorAll('input[name="lensMode"]').forEach(radio => {
         radio.addEventListener('change', () => {
+            const isDisabled = document.getElementById('modeUncorrected').checked;
             if (glassesRxInput) {
-                glassesRxInput.disabled = (document.getElementById('modeUncorrected').checked);
+                glassesRxInput.disabled = isDisabled;
+            }
+            if (glassesRxButton) {
+                glassesRxButton.disabled = isDisabled;
             }
              window.requestRedraw();
+        });
+    });
+
+    // Sign toggle button logic
+    document.querySelectorAll('.sign-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input && !input.disabled) {
+                const currentValue = parseFloatSafe(input.value, 0);
+                input.value = currentValue * -1;
+                window.requestRedraw();
+            }
         });
     });
 
@@ -91,6 +101,9 @@ document.addEventListener('DOMContentLoaded', () => {
     console.log("Simulator controls initialized.");
     // Set initial state for disabled inputs
     glassesRxInput.disabled = true; 
+    if (glassesRxButton) {
+        glassesRxButton.disabled = true;
+    }
     window.requestRedraw();
 });
 

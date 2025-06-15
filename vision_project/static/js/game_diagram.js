@@ -163,12 +163,18 @@ function drawGameScene(ctx, scene, view) {
 
 function drawGameSpoilerDiagrams(canvasId1, canvasId2, configs) {
     const canvas1 = document.getElementById(canvasId1);
+    const canvas2 = document.getElementById(canvasId2);
+    if (!canvas1 || !canvas2) return;
     const ctx1 = canvas1.getContext('2d');
+    const ctx2 = canvas2.getContext('2d');
+    const view = {
+        zoom: 30, // <-- Changed from 150 to 80
+        panX: canvas1.width / 2,
+        panY: canvas1.height / 2,
+    };
     const scene1 = getSceneDataForGame(configs[0]);
     const result1 = drawGameScene(ctx1, scene1, null); // Pass null for view to use auto-zoom
 
-    const canvas2 = document.getElementById(canvasId2);
-    const ctx2 = canvas2.getContext('2d');
     const scene2 = getSceneDataForGame(configs[1]);
     const result2 = drawGameScene(ctx2, scene2, null); // Pass null for view
     

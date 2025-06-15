@@ -73,6 +73,10 @@ document.addEventListener('DOMContentLoaded', () => {
         lens1PowerInput.disabled = disabled;
         lens2PowerInput.disabled = disabled;
         toggleSpoilerBtn.disabled = disabled;
+        
+        // Also disable the sign toggle buttons for the test lenses
+        document.querySelector('button[data-target="lens1Power"]').disabled = disabled;
+        document.querySelector('button[data-target="lens2Power"]').disabled = disabled;
     }
 
     function endGameDueToTime() {
@@ -147,6 +151,8 @@ document.addEventListener('DOMContentLoaded', () => {
     submitGuessBtn.addEventListener('click', async () => {
         submitGuessBtn.disabled = true;
         finalPrescriptionGuessInput.disabled = true;
+        document.querySelector('button[data-target="finalPrescriptionGuess"]').disabled = true;
+
         clearInterval(timerInterval);
         try {
             const response = await fetch('/game/submit_guess', {
@@ -172,7 +178,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 } else {
                     patientFeedbackDiv.textContent = `Error submitting: ${results.error || 'Unknown error.'}`;
                 }
-                if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
+                if (timeLeft > 0) { 
+                    submitGuessBtn.disabled = false; 
+                    finalPrescriptionGuessInput.disabled = false;
+                    document.querySelector('button[data-target="finalPrescriptionGuess"]').disabled = false;
+                }
             }
         } catch (error) {
             if(timeLeft <= 0) {
@@ -180,12 +190,28 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                  patientFeedbackDiv.textContent = `Network error: ${error.message}`;
             }
-            if (timeLeft > 0) { submitGuessBtn.disabled = false; finalPrescriptionGuessInput.disabled = false; }
+            if (timeLeft > 0) { 
+                submitGuessBtn.disabled = false; 
+                finalPrescriptionGuessInput.disabled = false;
+                document.querySelector('button[data-target="finalPrescriptionGuess"]').disabled = false;
+            }
         }
     });
     
     toggleSpoilerBtn.addEventListener('click', () => {
         spoilerSection.style.display = (spoilerSection.style.display === 'none') ? 'block' : 'none';
+    });
+
+    // Sign toggle button logic for the game
+    document.querySelectorAll('.sign-toggle-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const targetId = btn.dataset.target;
+            const input = document.getElementById(targetId);
+            if (input && !input.disabled) {
+                const currentValue = parseFloatSafe(input.value, 0);
+                input.value = currentValue * -1;
+            }
+        });
     });
 
 
@@ -232,4 +258,4 @@ document.addEventListener('DOMContentLoaded', () => {
         e.preventDefault();
         zoomDetailView(e.deltaY < 0 ? 1.2 : 1 / 1.2, e);
     });
-});     
+});

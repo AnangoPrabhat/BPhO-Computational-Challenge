@@ -236,3 +236,33 @@ button:active, .button-primary:active, .button-navigation:active {
 }
 .explanation-section h4 { margin-top: 0;}
 .explanation-section ul li { margin-bottom: 5px; }
+
+/* Input with sign toggle button */
+.input-with-button {
+    display: flex;
+    align-items: center;
+}
+
+.input-with-button input {
+    flex-grow: 1;
+    margin-right: -1px; /* Overlap borders */
+}
+
+.sign-toggle-btn {
+    padding: 10px 12px;
+    margin: 8px 0;
+    margin-left: 5px;
+    background-color: #6c757d;
+    color: white;
+    flex-shrink: 0;
+}
+
+.sign-toggle-btn:hover {
+    background-color: #5a6268;
+}
+
+.sign-toggle-btn:disabled {
+    background-color: #e9ecef;
+    color: #6c757d;
+    cursor: not-allowed;
+}

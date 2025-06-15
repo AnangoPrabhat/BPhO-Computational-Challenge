@@ -64,11 +64,17 @@
                 <p>Offer two test lenses to the patient. They will tell you which one makes their vision less blurry.</p>
                 <div class="control-group">
                     <label for="lens1Power">Test Lens 1 Power (D):</label>
-                    <input type="number" id="lens1Power" step="0.25" value="0.00">
+                    <div class="input-with-button">
+                        <input type="number" id="lens1Power" step="0.25" value="0.00">
+                        <button type="button" class="sign-toggle-btn" data-target="lens1Power" title="Toggle Sign">+/-</button>
+                    </div>
                 </div>
                 <div class="control-group">
                     <label for="lens2Power">Test Lens 2 Power (D):</label>
-                    <input type="number" id="lens2Power" step="0.25" value="-0.25">
+                    <div class="input-with-button">
+                        <input type="number" id="lens2Power" step="0.25" value="-0.25">
+                        <button type="button" class="sign-toggle-btn" data-target="lens2Power" title="Toggle Sign">+/-</button>
+                    </div>
                 </div>
                 <button id="askPatientBtn" class="button-primary">Ask Patient</button>
             </div>
@@ -110,7 +116,10 @@
                 <hr>
                 <h4>Time's Up or Make Your Final Guess!</h4>
                 <label for="finalPrescriptionGuess">Your Final Corrective Lens Prescription Guess (D):</label>
-                <input type="number" id="finalPrescriptionGuess" step="0.01" value="0.00">
+                <div class="input-with-button">
+                    <input type="number" id="finalPrescriptionGuess" step="0.01" value="0.00">
+                    <button type="button" class="sign-toggle-btn" data-target="finalPrescriptionGuess" title="Toggle Sign">+/-</button>
+                </div>
                 <button id="submitGuessBtn" class="button-action">Submit Final Guess</button>
             </div>
 
