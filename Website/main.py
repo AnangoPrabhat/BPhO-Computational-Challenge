@@ -1276,7 +1276,7 @@ def interactive_task_page(task_id):
         if task_id == "6":
             config["sliders"][0]["max"] = int(3 * w); config["sliders"][0]["value"] = int(1.5*w); config["sliders"][0]["step"] = max(1,int(w/20))
             config["sliders"][1]["min"] = -int(1.5 * h); config["sliders"][1]["max"] = int(1.5 * h); config["sliders"][1]["step"] = max(1,int(h/20))
-            config["sliders"][3]["max"] = int(2*w); config["sliders"][3]["value"] = int(0.75*w); config["sliders"][3]["step"] = max(1,int(w/20))
+            config["sliders"][3]["max"] = int(8*w); config["sliders"][3]["value"] = int(0.75*w); config["sliders"][3]["step"] = max(1,int(w/20))
             if "extra_context" not in config: config["extra_context"] = {}
             config["extra_context"]["img_width"] = w
         # (Add other task_id checks here if they also depend on image size)
