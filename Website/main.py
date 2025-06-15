@@ -899,7 +899,7 @@ interactive_tasks = {
             {"id": "start_x", "label": "Object Start X (from lens)", "min": 0, "max": int(3 * (img_width if img_width else W)), "value": int(1.5*(img_width if img_width else W)), "step": max(1,int(W/20)), "unit":"px"},
             {"id": "start_y", "label": "Object Start Y (from axis, slider increase moves object UP, image DOWN if inverted)", "min": -int(1.5 * (img_height if img_height else H)), "max": int(1.5 * (img_height if img_height else H)), "value": 0, "step": max(1,int(H/20)), "unit":"px"},
             {"id": "scale", "label": "Canvas Scale Factor", "min": 1, "max": 15, "value": 7, "step": 1},
-            {"id": "f_val", "label": "Focal Length", "min": 1, "max": int(2 * (img_width if img_width else W)), "value": int(0.75*(img_width if img_width else W)), "step": max(1,int(W/20)), "unit":"px"}
+            {"id": "f_val", "label": "Focal Length", "min": 1, "max": int(8 * (img_width if img_width else W)), "value": int(0.75*(img_width if img_width else W)), "step": max(1,int(W/20)), "unit":"px"}
         ],
         "plot_endpoint": "/plot/6",
         "banned_validation": True, 
