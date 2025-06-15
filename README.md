@@ -9,6 +9,6 @@ We also created an app for each of the websites, which can currently be download
 
 Acknowledgments:
 
-Parts of the development of this project utilised Google's Gemini 2.5 Pro for its reasoning and coding capabilities.
+Parts of the development of this project utilised Google's Gemini 2.5 Pro for its reasoning and coding capabilities. Specifically, for the main tasks website, much of it was previously done in jupyter notebook using ipywidgets, but when we tried to scale this into a whole website the ipywidgets sliders did not work well. Therefore, we used AI assistance to convert the ipywidgets sliders into JavaScript sliders, and for handling some parts of the Flask application code. For the vision simulator and eye test game website, we used AI assistance for fixing bugs in some areas and so some parts are AI-written. However, the core functionality remains the same since our first version. 
 
 Authors: Anango Prabhat, Thales Swanson
