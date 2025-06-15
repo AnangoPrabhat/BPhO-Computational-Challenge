@@ -3,7 +3,7 @@ import os
 import io
 import uuid
 import logging
-from math import isqrt, cos, sin, radians, pi, log10, acos, atan2, degrees, sqrt # Added sqrt
+from math import isqrt, cos, sin, radians, pi, log10, acos, atan2, degrees, sqrt
 from time import perf_counter
 from flask import Flask, request, redirect, url_for, render_template_string, send_file, jsonify, session
 from werkzeug.utils import secure_filename
@@ -11,67 +11,54 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.collections import LineCollection, PatchCollection
 from matplotlib.colors import LinearSegmentedColormap
-from matplotlib.patches import Polygon, Circle # Added Circle
+from matplotlib.patches import Polygon, Circle
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from skimage.transform import resize
 import matplotlib.image as mpimg
 
-
-
 app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
-app.secret_key = os.urandom(24) # Or a fixed secret key
+app.secret_key = os.urandom(24)
 
-# Configure upload folder and maximum dimensions for user uploaded images
+# Configure upload folder and maximum dimensions
 UPLOAD_FOLDER = './uploads'
 STATIC_FOLDER = './static'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
-os.makedirs(STATIC_FOLDER, exist_ok=True) # Ensure static folder exists
-MAX_DIMENSION = 192  # maximum width or height (in pixels)
+os.makedirs(STATIC_FOLDER, exist_ok=True)
+MAX_DIMENSION = 192
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
-# --- Ensure dummy logo and optics images exist in ./static for testing if not provided by user ---
+# --- Dummy Image Creation (No Changes) ---
 DUMMY_LOGO_PATH = os.path.join(STATIC_FOLDER, 'bpho_logo.jpg')
 DUMMY_OPTICS_IMAGE_PATH = os.path.join(STATIC_FOLDER, 'optics_image_1.jpg')
-
 if not os.path.exists(DUMMY_LOGO_PATH):
     try:
-        fig_logo = Figure(figsize=(3.96, 1.27))
-        canvas_logo = FigureCanvas(fig_logo)
-        ax_logo = fig_logo.add_subplot(111)
-        ax_logo.text(0.5, 0.5, 'BPHO Logo', ha='center', va='center')
-        ax_logo.axis('off')
+        fig_logo = Figure(figsize=(3.96, 1.27)); canvas_logo = FigureCanvas(fig_logo)
+        ax_logo = fig_logo.add_subplot(111); ax_logo.text(0.5, 0.5, 'BPHO Logo', ha='center', va='center'); ax_logo.axis('off')
         fig_logo.savefig(DUMMY_LOGO_PATH)
         logging.info(f"Created dummy logo at {DUMMY_LOGO_PATH}")
     except Exception as e:
         logging.error(f"Failed to create dummy logo: {e}")
-
-
 if not os.path.exists(DUMMY_OPTICS_IMAGE_PATH):
     try:
-        fig_optics = Figure(figsize=(2.574, 3.861)) # Approx 1/100th scale for speed
-        canvas_optics = FigureCanvas(fig_optics)
-        ax_optics = fig_optics.add_subplot(111)
-        ax_optics.text(0.5, 0.5, 'Optics Image', ha='center', va='center')
-        ax_optics.axis('off')
+        fig_optics = Figure(figsize=(2.574, 3.861)); canvas_optics = FigureCanvas(fig_optics)
+        ax_optics = fig_optics.add_subplot(111); ax_optics.text(0.5, 0.5, 'Optics Image', ha='center', va='center'); ax_optics.axis('off')
         fig_optics.savefig(DUMMY_OPTICS_IMAGE_PATH)
         logging.info(f"Created dummy optics image at {DUMMY_OPTICS_IMAGE_PATH}")
     except Exception as e:
         logging.error(f"Failed to create dummy optics image: {e}")
 
-
-########################################
-# GLOBAL INTERRUPT MANAGEMENT
-########################################
-active_requests = {}  # e.g. {"3": request_id, "6": request_id, ...}
-
+# --- Global Interrupt Management (No Changes) ---
+active_requests = {}
 def check_interrupt(task_key, request_id):
     if active_requests.get(task_key) != request_id:
         raise Exception("Aborted: a newer slider update was received.")
 
+# --- Image Loading Refactoring ---
+
 ########################################
-# GLOBAL IMAGE LOADING
+# IMAGE LOADING SECTION (REVISED)
 ########################################
 DEFAULT_IMAGE_FILENAME = "Tall1.jpg" # Default image filename
 DEFAULT_IMAGE_PATH = os.path.join(STATIC_FOLDER, DEFAULT_IMAGE_FILENAME)
@@ -87,37 +74,42 @@ if not os.path.exists(DEFAULT_IMAGE_PATH):
     except Exception as e:
         logging.error(f"Could not create dummy default image: {e}")
 
-
-global_image_rgba = None # Will store image as RGBA float [0,1]
-img_height, img_width = MAX_DIMENSION, MAX_DIMENSION # Default placeholder
+# Global variables that will be overwritten on a per-request basis
+global_image_rgba = None
+img_height, img_width = MAX_DIMENSION, MAX_DIMENSION
 img_aspect_ratio = 1.0
 
-def load_and_process_image(filepath):
-    global global_image_rgba, img_height, img_width, img_aspect_ratio
+def load_and_process_image_from_path(filepath):
+    """
+    Loads and processes an image from a given path.
+    This function is STATELESS: it does not modify global variables.
+    It returns the processed image data and its dimensions.
+    """
     try:
         img_data_raw = mpimg.imread(filepath)
-    except FileNotFoundError:
-        logging.error(f"Image file {filepath} not found!")
-        # Fallback to a black placeholder if default also fails
-        img_data_raw = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 4), dtype=np.float32) # RGBA
-        img_data_raw[:,:,3] = 1.0 # Full alpha
+    except (FileNotFoundError, IOError) as e:
+        logging.error(f"Image file '{filepath}' not found or unreadable ({e}). Loading default.")
+        try:
+            img_data_raw = mpimg.imread(DEFAULT_IMAGE_PATH)
+        except (FileNotFoundError, IOError):
+            img_data_raw = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 4), dtype=np.float32) # RGBA
+            img_data_raw[:,:,3] = 1.0 # Full alpha
 
     # Normalize image data to [0, 1] if it's in [0, 255] (uint8)
     if img_data_raw.dtype == np.uint8:
         img_data_raw = img_data_raw / 255.0
-    
-    # Ensure image is resized if too large (from upload, not default)
+
+    # Ensure image is resized if too large
     h_orig, w_orig = img_data_raw.shape[0], img_data_raw.shape[1]
-    if filepath != DEFAULT_IMAGE_PATH and (h_orig > MAX_DIMENSION or w_orig > MAX_DIMENSION): # Only resize uploads if too big
+    if (h_orig > MAX_DIMENSION or w_orig > MAX_DIMENSION):
         factor = max(h_orig, w_orig) / MAX_DIMENSION
         new_h, new_w = int(h_orig / factor), int(w_orig / factor)
         img_data_raw = resize(img_data_raw, (new_h, new_w), anti_aliasing=True, mode='reflect')
         img_data_raw = np.clip(img_data_raw, 0, 1)
 
-
     # Process image into RGBA float [0,1]
     if img_data_raw.ndim == 2: # Grayscale image
-        img_rgb = np.stack((img_data_raw,)*3, axis=-1) 
+        img_rgb = np.stack((img_data_raw,)*3, axis=-1)
         img_alpha = np.ones(img_data_raw.shape, dtype=np.float32)
     elif img_data_raw.shape[2] == 3: # RGB image
         img_rgb = img_data_raw
@@ -130,32 +122,31 @@ def load_and_process_image(filepath):
         img_rgb = np.zeros((MAX_DIMENSION, MAX_DIMENSION, 3), dtype=np.float32)
         img_alpha = np.ones((MAX_DIMENSION, MAX_DIMENSION), dtype=np.float32)
 
-    global_image_rgba = np.concatenate((img_rgb, img_alpha[:,:,np.newaxis]), axis=2)
-    img_height, img_width = global_image_rgba.shape[:2]
-    img_aspect_ratio = img_width / img_height if img_height > 0 else 1.0
-    logging.info(f"Image loaded: {filepath}, Size: {img_width}x{img_height}")
+    processed_rgba = np.concatenate((img_rgb, img_alpha[:,:,np.newaxis]), axis=2)
+    p_height, p_width = processed_rgba.shape[:2]
+    p_aspect_ratio = p_width / p_height if p_height > 0 else 1.0
 
-load_and_process_image(DEFAULT_IMAGE_PATH) # Load default image at startup
+    logging.info(f"Processed image from path: {filepath}, Size: {p_width}x{p_height}")
+    return processed_rgba, p_height, p_width, p_aspect_ratio
 
-H, W = img_height, img_width # For old code compatibility if needed, prefer img_height, img_width
+def load_initial_default_image():
+    """ This function is only called ONCE at startup. """
+    global global_image_rgba, img_height, img_width, img_aspect_ratio
+    global_image_rgba, img_height, img_width, img_aspect_ratio = load_and_process_image_from_path(DEFAULT_IMAGE_PATH)
 
-########################################
-# GENERIC BLANK IMAGE (for aborted computations)
-########################################
+load_initial_default_image()
+
+# This is kept for any old code that might still reference it.
+H, W = img_height, img_width
+
+# --- Blank Image Generation and Helper Functions (No Changes) ---
 def generate_blank_image():
-    fig = Figure(figsize=(4,4))
-    ax = fig.add_subplot(111)
-    ax.text(0.5, 0.5, 'Cancelled / Error', horizontalalignment='center',
-            verticalalignment='center', transform=ax.transAxes, fontsize=16)
-    ax.axis('off')
-    buf = io.BytesIO()
-    FigureCanvas(fig).print_png(buf)
-    buf.seek(0)
+    fig = Figure(figsize=(4,4)); ax = fig.add_subplot(111)
+    ax.text(0.5, 0.5, 'Cancelled / Error', ha='center', va='center', transform=ax.transAxes, fontsize=16)
+    ax.axis('off'); buf = io.BytesIO(); FigureCanvas(fig).print_png(buf); buf.seek(0)
     return buf
 
-########################################
-# HELPER FUNCTIONS FOR TASK 12 (PRISM MODEL)
-########################################
+# (All other helper functions like get_prism_color_for_frequency, draw_triangle_prism, etc. remain unchanged)
 def get_prism_color_for_frequency(f): 
     if 405e12 <= f < 480e12: return (1, 0, 0) # Red
     elif 480e12 <= f < 510e12: return (1, 127/255, 0) # Orange
@@ -188,112 +179,36 @@ def get_refractive_index_sellmeier(wavelength_m):
     return np.sqrt(np.maximum(1, 1 + n_sq_minus_1)) 
 
 def extend_to_edge(p1, p2, x_min, x_max, y_min, y_max):
-    """Extends a line segment (p1, p2) to the boundaries of a rectangle.
-
-    Args:
-        p1: Starting point of the segment (x, y) from which to extend.
-        p2: Another point on the line, defining the direction of extension from p1.
-        x_min: Minimum x-value of the canvas.
-        x_max: Maximum x-value of the canvas.
-        y_min: Minimum y-value of the canvas.
-        y_max: Maximum y-value of the canvas.
-
-    Returns:
-        The extended point (x, y) at the edge of the canvas. If the line is
-        parallel to an axis and doesn't intersect, or if p1 and p2 are the same,
-        it might return p2 or None depending on implementation details.
-        The provided version aims to find the furthest valid intersection.
-    """
-    x1, y1 = p1
-    x2, y2 = p2
-    dx = x2 - x1
-    dy = y2 - y1
-
-    # Avoid division by zero if p1 and p2 are the same point.
-    # In this case, direction is undefined, so extension is not possible.
-    if dx == 0 and dy == 0:
-        # print("Warning: p1 and p2 are the same. Cannot determine direction for extension.")
-        return p2 # Or None, or handle as an error
-
+    x1, y1 = p1; x2, y2 = p2
+    dx = x2 - x1; dy = y2 - y1
+    if dx == 0 and dy == 0: return p2
     t_values = []
-
-    # Check for intersection with vertical lines (x = x_min and x = x_max)
     if dx != 0:
-        t_xmin = (x_min - x1) / dx
-        t_xmax = (x_max - x1) / dx
-        # We are looking for t > 0 (or t > 1 if p2 is on the segment itself)
-        # For extending a ray starting at p1 and going through p2, we are interested in t > 0.
-        # The original segment is p1 to p2 (t=1). We want to go beyond p2 if p2 isn't already on edge.
-        # The logic below collects all intersections and then picks the "furthest".
-        if t_xmin >= 0: t_values.append(t_xmin)
-        if t_xmax >= 0: t_values.append(t_xmax)
-
-
-    # Check for intersection with horizontal lines (y = y_min and y = y_max)
+        if (t_xmin := (x_min - x1) / dx) >= 0: t_values.append(t_xmin)
+        if (t_xmax := (x_max - x1) / dx) >= 0: t_values.append(t_xmax)
     if dy != 0:
-        t_ymin = (y_min - y1) / dy
-        t_ymax = (y_max - y1) / dy
-        if t_ymin >= 0: t_values.append(t_ymin)
-        if t_ymax >= 0: t_values.append(t_ymax)
-
-    # Filter valid intersection points that are on the canvas boundaries
+        if (t_ymin := (y_min - y1) / dy) >= 0: t_values.append(t_ymin)
+        if (t_ymax := (y_max - y1) / dy) >= 0: t_values.append(t_ymax)
     valid_extended_points = []
+    epsilon = 1e-9
     for t in t_values:
-        if t == 0: continue # Skip the starting point itself unless it's the only option
-
-        x = x1 + t * dx
-        y = y1 + t * dy
-
-        # Check if the intersection point is within the canvas boundaries
-        # A small tolerance epsilon is good for floating point comparisons
-        epsilon = 1e-9
+        if t == 0: continue
+        x = x1 + t * dx; y = y1 + t * dy
         on_x_boundary = (abs(x - x_min) < epsilon or abs(x - x_max) < epsilon) and (y_min - epsilon <= y <= y_max + epsilon)
         on_y_boundary = (abs(y - y_min) < epsilon or abs(y - y_max) < epsilon) and (x_min - epsilon <= x <= x_max + epsilon)
-
-        if (x_min - epsilon <= x <= x_max + epsilon and \
-            y_min - epsilon <= y <= y_max + epsilon):
-            # Ensure the point is actually on one of the four boundary lines
-            if dx == 0: # Vertical line
-                 if y_min - epsilon <= y <= y_max + epsilon:
-                    valid_extended_points.append((x, y, t))
-            elif dy == 0: # Horizontal line
-                if x_min - epsilon <= x <= x_max + epsilon:
-                    valid_extended_points.append((x, y, t))
-            elif on_x_boundary or on_y_boundary : # Check if it's on the boundary segments
-                 valid_extended_points.append((x,y,t))
-
-
-    if not valid_extended_points:
-        # This can happen if the line defined by p1,p2 (for t>0)
-        # does not intersect the canvas boundaries.
-        # Or if p1 is outside and points away from canvas.
-        return None
-
-    # Find the intersection point that corresponds to the smallest positive t
-    # This ensures we get the *first* boundary hit in the direction of p2 from p1.
-    best_point = None
-    min_t = float('inf')
-
+        if (x_min - epsilon <= x <= x_max + epsilon and y_min - epsilon <= y <= y_max + epsilon):
+            if dx == 0 and (y_min - epsilon <= y <= y_max + epsilon): valid_extended_points.append((x, y, t))
+            elif dy == 0 and (x_min - epsilon <= x <= x_max + epsilon): valid_extended_points.append((x, y, t))
+            elif on_x_boundary or on_y_boundary: valid_extended_points.append((x,y,t))
+    if not valid_extended_points: return None
+    best_point = None; min_t = float('inf')
     for point_x, point_y, t_val in valid_extended_points:
-        # We are looking for points in the direction of (p2-p1) from p1.
-        # This means t should be positive.
-        # If p2 is just a direction indicator, t can be small.
-        # We need the intersection point on the boundary.
-        if t_val < min_t and t_val >=0 : # Smallest non-negative t
-            # Ensure the point is actually on a boundary segment
-            # (e.g. x is x_min or x_max, and y is within y_min, y_max OR
-            #  y is y_min or y_max, and x is within x_min, x_max)
+        if t_val < min_t and t_val >=0 :
             is_on_boundary = False
-            epsilon = 1e-9 # Tolerance for floating point comparisons
-            if (abs(point_x - x_min) < epsilon or abs(point_x - x_max) < epsilon) and (y_min - epsilon <= point_y <= y_max + epsilon):
-                is_on_boundary = True
-            if (abs(point_y - y_min) < epsilon or abs(point_y - y_max) < epsilon) and (x_min - epsilon <= point_x <= x_max + epsilon):
-                is_on_boundary = True
-            
+            if (abs(point_x - x_min) < epsilon or abs(point_x - x_max) < epsilon) and (y_min - epsilon <= point_y <= y_max + epsilon): is_on_boundary = True
+            if (abs(point_y - y_min) < epsilon or abs(point_y - y_max) < epsilon) and (x_min - epsilon <= point_x <= x_max + epsilon): is_on_boundary = True
             if is_on_boundary:
-                min_t = t_val
-                best_point = (point_x, point_y)
-
+                min_t = t_val; best_point = (point_x, point_y)
     return best_point
 
 ########################################
@@ -1335,17 +1250,44 @@ def handle_task(task_id):
 ########################################
 # ROUTE: Interactive Task Page
 ########################################
+########################################
+# ROUTE: Interactive Task Page (REVISED)
+########################################
 @app.route('/interactive/<task_id>')
 def interactive_task_page(task_id):
     if task_id in interactive_tasks:
         config = interactive_tasks[task_id]
-        return render_interactive_page(slider_config=config["sliders"],
-                                       title=config["title"],
-                                       plot_endpoint=config["plot_endpoint"],
-                                       task_id_for_template=task_id, 
-                                       banned_validation=config.get("banned_validation", False), # This will be true for task 6
-                                       extra_context=config.get("extra_context", {}),
-                                       playable=config.get("playable", False))
+
+        # Get the correct image path for the current user's session
+        image_path = session.get('user_image_path', DEFAULT_IMAGE_PATH)
+        if not os.path.exists(image_path):
+            image_path = DEFAULT_IMAGE_PATH
+            session.pop('user_image_path', None) # Clean up invalid session key
+
+        # Load image dimensions for this user to configure sliders correctly
+        _, h, w, aspect = load_and_process_image_from_path(image_path)
+
+        # Update slider configurations that depend on image dimensions
+        # This makes the page render with sliders appropriate for the user's image
+        if task_id == "5":
+            config["sliders"][0]["max"] = int(3 * w); config["sliders"][0]["value"] = int(w / 10.0 + 1); config["sliders"][0]["step"] = max(1,int(w/20))
+            config["sliders"][1]["min"] = int(-h); config["sliders"][1]["max"] = int(h); config["sliders"][1]["step"] = max(1,int(h/20))
+            config["sliders"][2]["min"] = int(max(w, h) * 1.5); config["sliders"][2]["max"] = int(max(w, h) * 5); config["sliders"][2]["value"] = int(max(w,h)*3)
+        if task_id == "6":
+            config["sliders"][0]["max"] = int(3 * w); config["sliders"][0]["value"] = int(1.5*w); config["sliders"][0]["step"] = max(1,int(w/20))
+            config["sliders"][1]["min"] = -int(1.5 * h); config["sliders"][1]["max"] = int(1.5 * h); config["sliders"][1]["step"] = max(1,int(h/20))
+            config["sliders"][3]["max"] = int(2*w); config["sliders"][3]["value"] = int(0.75*w); config["sliders"][3]["step"] = max(1,int(w/20))
+            if "extra_context" not in config: config["extra_context"] = {}
+            config["extra_context"]["img_width"] = w
+        # (Add other task_id checks here if they also depend on image size)
+
+        return render_interactive_page(
+            slider_config=config["sliders"], title=config["title"],
+            plot_endpoint=config["plot_endpoint"], task_id_for_template=task_id,
+            banned_validation=config.get("banned_validation", False),
+            extra_context=config.get("extra_context", {}),
+            playable=config.get("playable", False)
+        )
     return f"No interactive configuration for task {task_id}", 404
 
 
@@ -2871,11 +2813,13 @@ static_tasks = {
 # if not os.path.exists(app.config['UPLOAD_FOLDER']):
 #    os.makedirs(app.config['UPLOAD_FOLDER'])
 
+########################################
+# IMAGE UPLOAD ROUTE (REVISED)
+########################################
 @app.route('/upload', methods=["POST"])
 def upload_file():
-    global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W, interactive_tasks
     if "image_file" not in request.files:
-        return redirect(url_for("index")) # Assuming 'index' is a valid route
+        return redirect(url_for("index"))
 
     file = request.files["image_file"]
     if file.filename == "":
@@ -2883,82 +2827,57 @@ def upload_file():
 
     filename = secure_filename(file.filename)
 
-    # --- MODIFICATION START ---
     # Get or create a unique folder ID for the session
     if 'user_folder_id' not in session:
         session['user_folder_id'] = str(uuid.uuid4())
-    
     user_specific_folder_id = session['user_folder_id']
-    
-    # Create the full path for the session-specific upload directory
+
     session_upload_folder = os.path.join(app.config['UPLOAD_FOLDER'], user_specific_folder_id)
-    
-    # Ensure the session-specific directory exists
     os.makedirs(session_upload_folder, exist_ok=True)
-    
     filepath = os.path.join(session_upload_folder, filename)
-    # --- MODIFICATION END ---
 
     try:
+        # Save the file to the session-specific folder
         file.save(filepath)
-        load_and_process_image(filepath)
-        H, W = img_height, img_width
-
-        # Update slider configurations that depend on image dimensions
-        # (Your existing logic for updating interactive_tasks remains the same)
-        if "5" in interactive_tasks:
-            interactive_tasks["5"]["sliders"][0]["max"] = int(3 * img_width)
-            interactive_tasks["5"]["sliders"][0]["value"] = int(img_width / 10.0 +1)
-            interactive_tasks["5"]["sliders"][0]["step"] = max(1,int(img_width/20))
-            interactive_tasks["5"]["sliders"][1]["min"] = int(-img_height) # Slider range
-            interactive_tasks["5"]["sliders"][1]["max"] = int(img_height)  # Slider range
-            interactive_tasks["5"]["sliders"][1]["step"] = max(1,int(img_height/20))
-            interactive_tasks["5"]["sliders"][2]["min"] = int(max(img_width, img_height) * 1.5) # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["max"] = int(max(img_width, img_height) * 5)   # Renamed from max_val
-            interactive_tasks["5"]["sliders"][2]["value"] = int(max(img_width, img_height) * 3) # Renamed from max_val
-
-        if "6" in interactive_tasks:
-            interactive_tasks["6"]["sliders"][0]["max"] = int(3 * img_width)
-            interactive_tasks["6"]["sliders"][0]["value"] = int(1.5*img_width)
-            interactive_tasks["6"]["sliders"][0]["step"] = max(1,int(img_width/20))
-            interactive_tasks["6"]["sliders"][1]["min"] = -int(1.5 * img_height) # Slider range
-            interactive_tasks["6"]["sliders"][1]["max"] = int(1.5 * img_height)  # Slider range
-            interactive_tasks["6"]["sliders"][1]["step"] = max(1,int(img_height/20))
-            interactive_tasks["6"]["sliders"][3]["max"] = int(2*img_width)
-            interactive_tasks["6"]["sliders"][3]["value"] = int(0.75*img_width)
-            interactive_tasks["6"]["sliders"][3]["step"] = max(1,int(img_width/20))
-            if "extra_context" not in interactive_tasks["6"]: interactive_tasks["6"]["extra_context"] = {}
-            interactive_tasks["6"]["extra_context"]["img_width"] = img_width
-        
-        if "9" in interactive_tasks:
-            default_R_t9 = interactive_tasks["9"]["sliders"][0]["value"] 
-            default_h_factor_t9 = interactive_tasks["9"]["sliders"][3]["value"] 
-            obj_h_world_t9 = default_R_t9 * default_h_factor_t9
-            obj_w_world_t9 = img_aspect_ratio * obj_h_world_t9 if img_aspect_ratio > 0 else obj_h_world_t9
-            # obj_center_x_from_C > R_val + obj_w_world / 2
-            min_obj_center_x_t9 = default_R_t9 + obj_w_world_t9 / 2.0 + 0.01 * default_R_t9
-            interactive_tasks["9"]["sliders"][1]["min"] = round(min_obj_center_x_t9, 2) 
-            if interactive_tasks["9"]["sliders"][1]["value"] < min_obj_center_x_t9: 
-                interactive_tasks["9"]["sliders"][1]["value"] = round(min_obj_center_x_t9,2)
+        # Store the path to this user's uploaded file in their session
+        session['user_image_path'] = filepath
+        logging.info(f"User image saved to session path: {filepath}")
 
     except Exception as e:
-        logging.error(f"Error uploading/processing {filename} to {filepath}: {e}", exc_info=True)
-        # Fallback to default image
-        # Ensure DEFAULT_IMAGE_PATH is accessible and correctly defined
-        load_and_process_image(DEFAULT_IMAGE_PATH)
-        H, W = img_height, img_width # Update H, W based on default image too
+        logging.error(f"Error uploading {filename} to {filepath}: {e}", exc_info=True)
+        # If upload fails, clear any potentially invalid path from the session
+        session.pop('user_image_path', None)
 
-    return redirect(url_for("index")) 
+    return redirect(url_for("index"))
 
 ########################################
 # ROUTE: Handle Plot (Interactive/Static)
 ########################################
+########################################
+# ROUTE: Handle Plot (Interactive/Static) (REVISED)
+########################################
 @app.route('/plot/<task_id>')
 def plot_task(task_id):
-    req_id_param = request.args.get("_req_id", str(uuid.uuid4())) 
+    req_id_param = request.args.get("_req_id", str(uuid.uuid4()))
     
+    # --- MAIN FIX: Set global state on a per-request basis ---
+    global global_image_rgba, img_height, img_width, img_aspect_ratio, H, W
+
+    # Determine which image to use for this specific request
+    image_to_use_path = session.get('user_image_path', DEFAULT_IMAGE_PATH)
+
+    # Verify the session file still exists, otherwise revert to default
+    if not os.path.exists(image_to_use_path):
+        image_to_use_path = DEFAULT_IMAGE_PATH
+        session.pop('user_image_path', None) # Clean up invalid session key
+
+    # Load the correct image data and overwrite the global variables for this request
+    global_image_rgba, img_height, img_width, img_aspect_ratio = load_and_process_image_from_path(image_to_use_path)
+    H, W = img_height, img_width # Update legacy dimension variables
+    # --- END OF MAIN FIX ---
+
     if task_id in interactive_tasks:
-        active_requests[task_id] = req_id_param 
+        active_requests[task_id] = req_id_param
         try:
             buf = None
             if task_id == "3":
@@ -2976,12 +2895,12 @@ def plot_task(task_id):
                 buf = generate_task4_plot(v_log, n1, n2, y, l, req_id_param)
             elif task_id == "5":
                 off_x = float(request.args.get("offset_x", interactive_tasks["5"]["sliders"][0]["value"]))
-                off_y = float(request.args.get("offset_y", interactive_tasks["5"]["sliders"][1]["value"])) # This is the slider value
+                off_y = float(request.args.get("offset_y", interactive_tasks["5"]["sliders"][1]["value"]))
                 can_size = float(request.args.get("canvas_size", interactive_tasks["5"]["sliders"][2]["value"]))
                 buf = generate_task5_plot(off_x, off_y, can_size, req_id_param)
             elif task_id == "6": # Also Task 7
                 st_x = int(request.args.get("start_x", interactive_tasks["6"]["sliders"][0]["value"]))
-                st_y = int(request.args.get("start_y", interactive_tasks["6"]["sliders"][1]["value"])) # This is the slider value
+                st_y = int(request.args.get("start_y", interactive_tasks["6"]["sliders"][1]["value"]))
                 sc = int(request.args.get("scale", interactive_tasks["6"]["sliders"][2]["value"]))
                 f = int(request.args.get("f_val", interactive_tasks["6"]["sliders"][3]["value"]))
                 buf = generate_task6_plot(st_x, st_y, sc, f, req_id_param)
@@ -3013,7 +2932,7 @@ def plot_task(task_id):
                 buf = generate_task12a_plot(theta_i, alpha_p, scale_12a, req_id_param)
             else:
                 return "Interactive task plot generation not fully implemented.", 404
-            
+
             if buf: return send_file(buf, mimetype="image/png")
             else: return send_file(generate_blank_image(), mimetype="image/png")
 
