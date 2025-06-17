@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - Optics Simulator</title>
+    
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Fonts: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Custom styles to apply the Inter font -->
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800">
+
+    <!-- Main container for the policy content -->
+    <div class="container mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-12 sm:py-16">
+        
+        <div class="bg-white rounded-2xl shadow-lg p-8 md:p-12">
+            
+            <!-- Header section -->
+            <header class="border-b border-gray-200 pb-6 mb-8">
+                <h1 class="text-4xl font-bold text-gray-900 tracking-tight">Privacy Policy</h1>
+                <p class="mt-2 text-lg text-gray-600">for Optics Simulator</p>
+            </header>
+            
+            <main class="space-y-10">
+                <!-- Effective Date -->
+                <div>
+                    <p class="text-sm text-gray-500 font-medium"><strong>Effective Date:</strong> 17th June 2025</p>
+                </div>
+
+                <!-- Section 1: Introduction -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">1. Introduction</h2>
+                    <p class="text-base leading-relaxed text-gray-700">
+                        Welcome to Optics Simulator. This Privacy Policy outlines our firm commitment to protecting the privacy of our users. This policy applies to the Optics Simulator application (the "App"), developed by Anango Prabhat and Thales Swanson (the "Developers"). Our core privacy principle is simple: we do not collect, store, or process any of your personal data. Your privacy is of the utmost importance to us.
+                    </p>
+                </section>
+
+                <!-- Section 2: Information We Do Not Collect -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">2. Information We Do Not Collect</h2>
+                    <p class="text-base leading-relaxed text-gray-700 mb-4">
+                        We want to be completely transparent about our data practices. The Optics Simulator app is designed to function without collecting any personally identifiable information or any other form of user data. We do not collect:
+                    </p>
+                    <ul class="list-disc list-inside space-y-3 text-base text-gray-700 pl-4">
+                        <li><strong>Personal Information:</strong> This includes, but is not limited to, your name, email address, phone number, or any other contact information.</li>
+                        <li><strong>Usage Data:</strong> We do not track how you interact with the App. We do not collect analytics data, such as session duration, features used, or crash reports.</li>
+                        <li><strong>Device Information:</strong> We do not collect any information about the device on which you are using the App, such as the device model, operating system version, or unique device identifiers.</li>
+                        <li><strong>Location Data:</strong> The App does not collect, use, or request any information about your geographic location.</li>
+                    </ul>
+                </section>
+
+                <!-- Section 3: Data Sharing and Transfer -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">3. Data Sharing and Transfer</h2>
+                    <p class="text-base leading-relaxed text-gray-700">
+                        Since we do not collect any user data, there is no data to share with or transfer to any third parties. We do not engage with any third-party services for advertising, analytics, or any other purpose that would involve sharing user information.
+                    </p>
+                </section>
+
+                <!-- Section 4: Children's Privacy -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">4. Children's Privacy</h2>
+                    <p class="text-base leading-relaxed text-gray-700">
+                        The App is designed to be safe for all ages. We do not knowingly collect any personal information from children. As we do not collect any data whatsoever, we do not have any information from any user, including children, to use or disclose.
+                    </p>
+                </section>
+
+                <!-- Section 5: Changes to This Privacy Policy -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">5. Changes to This Privacy Policy</h2>
+                    <p class="text-base leading-relaxed text-gray-700">
+                        We may update this Privacy Policy from time to time to reflect any changes in our practices, even if those changes maintain our "no data collection" stance. Any updates will be posted within the App or on our designated webpage. We encourage you to review this Privacy Policy periodically to stay informed.
+                    </p>
+                </section>
+
+                <!-- Section 6: Contact Us -->
+                <section>
+                    <h2 class="text-2xl font-semibold text-gray-900 mb-4">6. Contact Us</h2>
+                    <p class="text-base leading-relaxed text-gray-700">
+                        If you have any questions or concerns about this Privacy Policy or our privacy practices, please do not hesitate to contact us.
+                    </p>
+                    <div class="mt-4 bg-gray-50 border border-gray-200 rounded-lg p-4">
+                        <p class="text-base text-gray-800"><strong>Developers:</strong> Anango Prabhat and Thales Swanson</p>
+                        <p class="text-base text-gray-800"><strong>Contact Email:</strong> <a href="mailto:thalesswanson@gmail.com" class="text-blue-600 hover:text-blue-700 font-medium">thalesswanson@gmail.com</a></p>
+                    </div>
+                </section>
+            </main>
+
+        </div>
+    </div>
+
+</body>
+</html>
