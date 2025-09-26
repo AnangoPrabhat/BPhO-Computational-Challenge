@@ -1,7 +1,11 @@
 # BPhO-Computational-Challenge
 The [BPhO Computational Challenge](https://www.bpho.org.uk/bpho/computational-challenge/), run by the British Physics Olympiad, is a competition for solving physics problems computationally. In 2025, the topic is optics. 
 
+
 This project consists of our solution to the BPhO Computational Challenge 2025 Optics Tasks. We have developed a website (/Website) to show our solutions for the tasks interactively, and a vision demonstration (/vision_project) website containing an interactive simulation of the eye's lens and an eye test game.
+To access these websites, we have provided links to deployed versions:
+Task Solutions Website: [https://bpho-computational-challenge-production.up.railway.app/](url)
+Vision Demonstration Website: [https://web-production-74c1.up.railway.app/](url)
 
 Our solutions to the Ray Optics Problems and our report on the challenge are also included here.
 
