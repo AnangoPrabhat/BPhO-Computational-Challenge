@@ -8,7 +8,7 @@ To access these websites, we have provided links to deployed versions:
 - **Task Solutions Website:** [https://bpho-computational-challenge-production.up.railway.app/](https://bpho-computational-challenge-production.up.railway.app/)
 - **Vision Demonstration Website:** [https://web-production-74c1.up.railway.app/](https://web-production-74c1.up.railway.app/)
 
-Our solutions to the Ray Optics Problems and our report on the challenge are also included here.
+Our solutions to the Ray Optics Problems and our report on the challenge are also included here on this repository.
 
 We also created an app for each of the websites, which can currently be downloaded using the APK files in /APKs. To install these APKs, you must enable "Install from unknown sources" in your Android settings. This setting can expose your device to security risks. We guarantee that the provided APKs are built directly from the source code in this repository and contain no malicious code, however, for maximum security, use the websites.
 
